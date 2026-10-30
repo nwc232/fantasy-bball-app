@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: category-lab
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/meta
