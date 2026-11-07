@@ -69,3 +69,14 @@ def test_eligibility_scales_with_season():
     assert set(df.loc[e, "g"]) == {5, 4, 2}          # 25% of 5 games -> 2 games minimum
     df2 = pd.DataFrame({"g": [82, 40, 21, 20] * 40, "mpg": [30] * 160})
     assert set(df2.loc[E.eligible(df2), "g"]) == {82, 40, 21}
+
+
+def test_explain_and_refresh():
+    j = c.get("/api/rankings?system=tz&split=prev").json()
+    pid = j["players"][40]["id"]
+    e = c.get(f"/api/explain?player={pid}&split=prev&system=tz&target=durant_h2h").json()
+    assert e["current"]["rank"] == 41 or e["current"]["rank"] <= 41
+    assert e["path"][-1]["rank"] == e["target"]["rank"]
+    assert {p["key"] for p in e["presets"]} == {"tz", "z", "g", "durant", "durant_h2h"}
+    key = c.post("/api/league/demo").json()["key"]
+    assert "updated" in c.post(f"/api/league/{key}/refresh").json()

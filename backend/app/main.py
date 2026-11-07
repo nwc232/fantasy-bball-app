@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -186,6 +187,7 @@ def league_view(key: str, split: str = "season", system: str = "tz", punt: str =
         "punts": punts, "split": used, "available_splits": list(lg["frames"]),
         "starters": p["starters"], "roster_size": p["roster_size"],
         "periods": sorted(p["matchup_periods"]), "period": period,
+        "updated": lg["ts"],
         "current_period": p["current_period"], "has_schedule": bool(lg["sched"]),
         "teams": teams,
         "power": L.power_table(p, rosters, cats),
@@ -193,6 +195,107 @@ def league_view(key: str, split: str = "season", system: str = "tz", punt: str =
         "free_agents": _player_json(pool[pool["fantasy_team"] == 0].sort_values("value", ascending=False)
                                     .head(60), cats, team_names),
     }
+
+
+@app.post("/api/league/{key}/refresh")
+def league_refresh(key: str):
+    try:
+        lg = STORE.refresh_league(key)
+    except KeyError:
+        raise HTTPException(404, "League not loaded; import it again.")
+    except espn.ESPNError as e:
+        raise HTTPException(400, str(e))
+    return {"updated": lg["ts"]}
+
+
+# --------------------------------------------------------------------------- #
+# Explain: why is a player ranked where he is, setting by setting
+# --------------------------------------------------------------------------- #
+SWITCH_ORDER = ["reference", "transform", "center", "weights", "tov", "minus_one"]
+
+
+def _switch_label(k: str, v) -> str:
+    if k == "reference":
+        return {"rostered": "Scale against rostered players",
+                "waivers": "Scale against rostered + waiver pool",
+                "nba": "Scale against the whole NBA"}[v]
+    if k == "transform":
+        return "Transform on" if v else "Transform off"
+    if k == "center":
+        return "Zero at waiver level" if v == "replacement" else "Zero at pool average"
+    if k == "weights":
+        return f"{E.WEIGHT_LABELS[v]} weights"
+    if k == "tov":
+        return {1.0: "Turnovers full weight", 0.5: "Turnovers half weight",
+                0.0: "Ignore turnovers"}[float(v)]
+    return "Minus 1 on" if v else "Minus 1 off"
+
+
+@app.get("/api/explain")
+def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str = "season",
+            system: str = "tz", punt: str = "", teams: int = 12, roster: int = 13,
+            league: str | None = None, m1: int | None = None, ref: str | None = None,
+            center: str | None = None, transform: int | None = None,
+            weights: str | None = None, tov: float | None = None):
+    cur = _system(system, ref, center, transform, weights, tov, m1)
+    if target not in E.SYSTEMS:
+        raise HTTPException(400, "unknown target")
+    tgt = E.SYSTEMS[target]
+    year = year or current_year()
+    cats = E.CATS
+    if league:
+        lg = STORE.league(league)
+        if not lg:
+            raise HTTPException(404, "League not loaded; import it again.")
+        frames, cats = lg["frames"], lg["parsed"]["cats"]
+        teams, roster = len(lg["parsed"]["teams"]), lg["parsed"]["roster_size"]
+    else:
+        frames, _ = STORE.pool(year)
+    _, df = _pick_split(frames, split)
+    idx = df.index[df["id"] == player]
+    if not len(idx):
+        raise HTTPException(404, "Player not found in this stat window.")
+    i = idx[0]
+    use = [c for c in cats if c not in _punts(punt)] or cats
+    size = teams * roster
+    cache: dict = {}
+
+    def run(sy: E.System):
+        key = tuple(sorted(sy.spec().items()))
+        if key not in cache:
+            sc = E.score(df, sy, cats=use, pool_size=size)
+            cache[key] = (sc, int(sc["value"].rank(ascending=False, method="min")[i]))
+        return cache[key]
+
+    def detail(sy: E.System):
+        sc, rank = run(sy)
+        w = E.category_weights(sy, use)
+        row = sc.loc[i]
+        return {"rank": rank, "value": round(float(row["value"]), 3),
+                "dropped": row["dropped"], "spec": sy.spec(), "label": sy.label,
+                "cats": {c: {"v": round(float(row[f"v_{c}"]), 2),
+                             "w": round(float(w.get(c, 0.0)), 2),
+                             "contrib": round(float(row[f"v_{c}"] * w.get(c, 0.0)), 2)}
+                         for c in use}}
+
+    cs, ts = cur.spec(), tgt.spec()
+    diffs = [k for k in SWITCH_ORDER if cs[k] != ts[k]]
+    base_rank = run(cur)[1]
+    singles, path, step = [], [], cur
+    for k in diffs:
+        one = E.make_system(cur, **{k: ts[k]})
+        singles.append({"switch": k, "label": _switch_label(k, ts[k]), "rank": run(one)[1],
+                        "delta": base_rank - run(one)[1]})
+        prev = run(step)[1]
+        step = E.make_system(step, **{k: ts[k]})
+        path.append({"switch": k, "label": _switch_label(k, ts[k]), "rank": run(step)[1],
+                     "delta": prev - run(step)[1]})
+    presets = [{"key": s.key, "label": s.label, "rank": run(s)[1]} for s in E.SYSTEMS.values()]
+    r = df.loc[i]
+    return {"player": {"id": player, "name": r["name"], "team": r["team"], "g": int(r["g"]),
+                       "mpg": round(float(r["mpg"]), 1)},
+            "current": detail(cur), "target": detail(tgt), "target_key": target,
+            "singles": singles, "path": path, "presets": presets}
 
 
 class TradeBody(BaseModel):

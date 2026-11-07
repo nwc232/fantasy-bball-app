@@ -129,6 +129,13 @@ async function init() {
   ["#teams", "#roster"].forEach((s) => $(s).addEventListener("change", loadRankings));
   $("#more").addEventListener("click", () => { S.show += 200; renderRankings(); });
   $("#lgImport").addEventListener("click", importLeague);
+  $("#refreshBtn").addEventListener("click", hardRefresh);
+  $("#exClose").addEventListener("click", closeExplain);
+  $("#explain").addEventListener("click", (e) => { if (e.target.id === "explain") closeExplain(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeExplain(); });
+  // background refresh every 10 minutes while the tab is visible (server re-pulls ESPN when stale)
+  setInterval(() => { if (!document.hidden) refreshAll(); }, 10 * 60 * 1000);
+  setInterval(renderUpdated, 30 * 1000);
   $("#lgDemo").addEventListener("click", () => loadLeagueKey(null, true));
   $("#myTeam").addEventListener("change", () => {
     S.myTeam = +$("#myTeam").value; store.set("myTeam", S.myTeam); S.selTeam = S.myTeam;
@@ -177,14 +184,32 @@ function renderPuntChips(cats) {
   }));
 }
 function refreshAll() { loadRankings(); if (S.leagueKey) loadLeague(); }
+async function hardRefresh() {
+  const b = $("#refreshBtn"); b.disabled = true; b.textContent = "↻ Refreshing…";
+  try {
+    if (S.leagueKey) await api(`/api/league/${encodeURIComponent(S.leagueKey)}/refresh`, { method: "POST" });
+    await loadRankings(true);
+    if (S.leagueKey) await loadLeague();
+  } catch (e) { $("#source").textContent = e.message; }
+  b.disabled = false; b.textContent = "↻ Refresh";
+}
+function renderUpdated() {
+  const t = S.league ? S.league.updated * 1000 : S.rankLoaded;
+  if (!t) { $("#updated").textContent = ""; return; }
+  const m = Math.round((Date.now() - t) / 60000);
+  $("#updated").textContent = m < 1 ? "· updated just now" : `· updated ${m} min ago`;
+}
 
 /* ---------- rankings ---------- */
-async function loadRankings() {
+async function loadRankings(force) {
   const p = { ...params(), teams: $("#teams").value, roster: $("#roster").value, league: S.leagueKey };
+  if (force === true) p.refresh = 1;
   try {
     S.rank = await api("/api/rankings?" + qs(p));
   } catch (e) { $("#source").textContent = e.message; return; }
   $("#source").textContent = `Data: ${S.rank.source}`;
+  if (!S.leagueKey) S.rankLoaded = Date.now();
+  renderUpdated();
   if (!S.minGpTouched) {
     const maxG = Math.max(...S.rank.players.map((p) => p.g), 0);
     $("#minGp").value = Math.floor(maxG * 0.25);
@@ -214,7 +239,7 @@ function playerRowHTML(p, cols, cats) {
   return cols.map((c) => {
     if (c.k === "name") {
       const owner = p.fantasy_team_name != null ? `<span class="owner"> · ${esc(p.fantasy_team_name)}</span>` : "";
-      return `<td class="l"><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""}<br><span class="meta">${esc(p.team)} · ${esc(p.pos)}</span>${owner}</td>`;
+      return `<td class="l clickable" data-pid="${esc(p.id)}" title="Why is he ranked here?"><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""}<br><span class="meta">${esc(p.team)} · ${esc(p.pos)}</span>${owner}</td>`;
     }
     if (c.k === "dz") {
       if (p.rank_z == null) return "<td></td>";
@@ -263,12 +288,64 @@ function renderRankings() {
   $("#rankTable").innerHTML = headerHTML(cols) + "<tbody>" + shown.map((p) =>
     `<tr class="${withOwner && p.fantasy_team === S.myTeam ? "mine" : ""}">${playerRowHTML(p, cols, cats)}</tr>`).join("") + "</tbody>";
   $("#more").classList.toggle("hidden", rows.length <= S.show);
+  bindExplain("#rankTable");
   $$("#rankTable th").forEach((th) => th.addEventListener("click", () => {
     const k = th.dataset.k;
     if (S.sort.key === k) S.sort.dir *= -1; else { S.sort.key = k; S.sort.dir = ["name", "rank"].includes(k) ? 1 : -1; }
     renderRankings();
   }));
   $("#leagueSizeWrap").classList.toggle("hidden", withOwner);
+}
+
+/* ---------- explain ---------- */
+function bindExplain(table) {
+  $$(table + " td.clickable").forEach((td) => td.addEventListener("click", () => openExplain(td.dataset.pid)));
+}
+function closeExplain() { $("#explain").classList.add("hidden"); }
+async function openExplain(pid, target) {
+  const curKey = $("#system").value;
+  target = target || (curKey === "durant_h2h" ? "tz" : "durant_h2h");
+  $("#explain").classList.remove("hidden");
+  $("#exBody").innerHTML = `<p class="meta">Re-ranking the player pool under each setting…</p>`;
+  const p = { ...params(), player: pid, target, teams: $("#teams").value, roster: $("#roster").value, league: S.leagueKey };
+  let e;
+  try { e = await api("/api/explain?" + qs(p)); }
+  catch (err) { $("#exBody").innerHTML = `<p class="warn">${esc(err.message)}</p>`; return; }
+  const cur = e.current, tg = e.target;
+  const tgtLabel = S.meta.systems.find((s) => s.key === e.target_key).label;
+  const curLabel = curKey === "custom" ? "Custom" : S.meta.systems.find((s) => s.key === curKey).label;
+  const dr = (d) => d === 0 ? '<span class="meta">±0</span>' : `<span class="${d > 0 ? "up" : "down"}">${d > 0 ? "▲" : "▼"}${Math.abs(d)}</span>`;
+  const biggest = [...e.singles].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+  const cats = Object.keys(cur.cats);
+  $("#exBody").innerHTML = `
+    <h2>${esc(e.player.name)} <span class="meta">${esc(e.player.team)} · ${e.player.g} GP · ${e.player.mpg} MPG</span></h2>
+    <div class="row" style="margin:8px 0">
+      <label class="inline">Compare ${esc(curLabel)} with
+        <select id="exTarget">${S.meta.systems.filter((s) => s.key !== curKey).map((s) => `<option value="${s.key}" ${s.key === e.target_key ? "selected" : ""}>${esc(s.label)}</option>`).join("")}</select>
+      </label>
+    </div>
+    <h3>Rank under each system</h3>
+    <div class="preset-row">${e.presets.map((p) => `<div class="p ${p.key === curKey ? "cur" : ""}"><b>#${p.rank}</b>${esc(p.label)}</div>`).join("")}</div>
+    ${biggest ? `<div class="callout">Going from <b>#${cur.rank}</b> to <b>#${tg.rank}</b>. The biggest single factor is <b>${esc(biggest.label.toLowerCase())}</b> (${dr(biggest.delta)} on its own).</div>` : `<div class="callout">Both systems use identical settings.</div>`}
+    ${e.path.length ? `<h3>One setting at a time</h3>
+    <table class="grid"><thead><tr><th class="l">Change</th><th>On its own</th><th>Cumulative rank</th></tr></thead><tbody>
+      <tr><td class="l meta">Start: ${esc(curLabel)}</td><td></td><td><b>#${cur.rank}</b></td></tr>
+      ${e.path.map((s, i) => `<tr><td class="l">${esc(s.label)}</td><td>#${e.singles[i].rank} ${dr(e.singles[i].delta)}</td><td><b>#${s.rank}</b> ${dr(s.delta)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="note">"On its own" changes only that setting from your current system. "Cumulative" applies the changes in order until you reach ${esc(tgtLabel)}.</p>` : ""}
+    <h3>Category values</h3>
+    <table class="grid"><thead><tr><th class="l">Cat</th><th>${esc(curLabel)}</th><th>× wt</th><th>${esc(tgtLabel)}</th><th>× wt</th></tr></thead><tbody>
+      ${cats.map((c) => {
+        const a = cur.cats[c], b = tg.cats[c];
+        const da = cur.dropped === LABEL[c], db = tg.dropped === LABEL[c];
+        return `<tr><td class="l"><b>${LABEL[c]}</b></td>
+          <td style="${heat(a.v)}">${a.v.toFixed(2)}</td><td class="meta">${da ? "dropped" : a.contrib.toFixed(2)}</td>
+          <td style="${heat(b.v)}">${b.v.toFixed(2)}</td><td class="meta">${db ? "dropped" : b.contrib.toFixed(2)}</td></tr>`;
+      }).join("")}
+      <tr><td class="l"><b>Value</b></td><td></td><td><b>${cur.value.toFixed(2)}</b></td><td></td><td><b>${tg.value.toFixed(2)}</b></td></tr>
+    </tbody></table>
+    <p class="note">Values are on each system's own scale, so compare the ranks rather than the raw numbers between systems.</p>`;
+  $("#exTarget").addEventListener("change", () => openExplain(pid, $("#exTarget").value));
 }
 
 /* ---------- league ---------- */
@@ -316,6 +393,7 @@ async function loadLeague(first) {
   $("#period").innerHTML = L.periods.map((n) => `<option value="${n}">Week ${n}${n === L.current_period ? " (current)" : ""}</option>`).join("");
   $("#period").value = L.period;
   $("#leagueChip").textContent = `League: ${L.name}`;
+  renderUpdated();
   $("#importBox").classList.add("hidden");
   $("#leagueBody").classList.remove("hidden");
   $$(".needs-league").forEach((e) => e.classList.add("hidden"));
@@ -356,6 +434,7 @@ function renderRoster() {
   const cols = rankColumns(L.cats, false, true).filter((c) => c.k !== "dz");
   $("#rosterTable").innerHTML = headerHTML(cols, false) + "<tbody>" +
     t.players.map((p) => `<tr>${playerRowHTML(p, cols, L.cats)}</tr>`).join("") + "</tbody>";
+  bindExplain("#rosterTable");
 }
 
 /* ---------- matchups ---------- */

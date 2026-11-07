@@ -155,6 +155,22 @@ button.ghost { background: var(--panel); border: 1px solid var(--line); color: v
 .down { color: rgb(var(--bad)); }
 .warn { color: rgb(var(--bad)); font-size: 12px; margin: 6px 0; }
 
+/* explain drawer */
+.drawer { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; display: flex; justify-content: flex-end; }
+.drawer-inner { width: min(620px, 100%); height: 100%; overflow-y: auto; background: var(--bg); padding: 22px 24px 40px;
+  border-left: 1px solid var(--line); position: relative; }
+.drawer .close { position: absolute; top: 14px; right: 16px; }
+.drawer h2 { margin-right: 40px; }
+.drawer table { width: 100%; }
+.preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+.preset-row .p { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; font-size: 12px; }
+.preset-row .p b { font-size: 16px; display: block; font-variant-numeric: tabular-nums; }
+.preset-row .p.cur { border-color: var(--accent); }
+.clickable { cursor: pointer; }
+.clickable:hover .name { text-decoration: underline; }
+.callout { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px;
+  padding: 10px 12px; margin: 10px 0; font-size: 13px; }
+
 /* method */
 .prose { max-width: 78ch; line-height: 1.6; font-size: 15px; }
 .prose table { border-collapse: collapse; font-size: 13px; margin: 10px 0; font-variant-numeric: tabular-nums; }

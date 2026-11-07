@@ -39,7 +39,8 @@
     <input type="checkbox" id="m1"> <span>Minus 1</span>
   </label>
   <button class="ghost small" id="advBtn" type="button">Model settings ▾</button>
-  <div class="league-chip" id="leagueChip"></div>
+  <div class="league-chip"><span id="leagueChip"></span> <span id="updated" class="meta"></span>
+    <button class="ghost small" id="refreshBtn" type="button" title="Re-pull stats and league rosters from ESPN">↻ Refresh</button></div>
 </section>
 <section class="controls adv hidden" id="adv">
   <label>Scale against <select id="o_ref"></select></label>
@@ -158,6 +159,12 @@
     <article class="prose" id="methodText"></article>
   </section>
 </main>
+<div id="explain" class="drawer hidden" role="dialog" aria-label="Ranking breakdown">
+  <div class="drawer-inner">
+    <button class="ghost small close" id="exClose" type="button">✕</button>
+    <div id="exBody"></div>
+  </div>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

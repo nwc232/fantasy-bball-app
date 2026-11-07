@@ -107,6 +107,16 @@ class Store:
                                 "source": "Demo league built from the 2025-26 season"}
         return "demo"
 
+    def refresh_league(self, key: str) -> dict:
+        lg = self.leagues.get(key)
+        if not lg:
+            raise KeyError(key)
+        if lg["creds"]:
+            self.import_league(*lg["creds"])
+        else:
+            self.demo_league()
+        return self.leagues[key]
+
     def league(self, key: str) -> dict | None:
         lg = self.leagues.get(key)
         if lg and lg["creds"] and time.time() - lg["ts"] > LEAGUE_TTL:
