@@ -310,6 +310,7 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
     limit = p.get("adds_limit_period")
     if adds_left is None:
         adds_left = 7 if (limit is None or limit < 0) else max(0, limit - used)
+    adds_left = int(adds_left)
 
     # free agent candidates with at least one countable game
     fa = pool[(pool["fantasy_team"] == 0) & (pool["status"] == "FREEAGENT") & (pool["avail"] > 0)]

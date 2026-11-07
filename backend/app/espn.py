@@ -234,6 +234,14 @@ def parse_week_box(data: dict, period: int) -> dict[int, dict]:
     return out
 
 
+def _int_or_none(x):
+    """ESPN sometimes sends counts as floats (7.0); normalise to int."""
+    try:
+        return None if x is None else int(round(float(x)))
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_league(data: dict, year: int) -> dict:
     settings = data.get("settings", {}) or {}
     scoring = settings.get("scoringSettings", {}) or {}
@@ -281,7 +289,8 @@ def parse_league(data: dict, year: int) -> dict:
                       "abbrev": t.get("abbrev", ""), "owner": owner,
                       "record": {"w": rec.get("wins", 0), "l": rec.get("losses", 0),
                                  "t": rec.get("ties", 0)},
-                      "adds_this_period": adds_period, "adds_season": tc.get("acquisitions"),
+                      "adds_this_period": _int_or_none(adds_period),
+                      "adds_season": _int_or_none(tc.get("acquisitions")),
                       "roster": roster})
 
     schedule = []
@@ -324,8 +333,8 @@ def parse_league(data: dict, year: int) -> dict:
         "last_day": status.get("finalScoringPeriod"),
         "current_period": cur_period,
         "slot_counts": start_slots,
-        "adds_limit_period": acq.get("matchupAcquisitionLimit"),
-        "adds_limit_season": acq.get("acquisitionLimit"),
+        "adds_limit_period": _int_or_none(acq.get("matchupAcquisitionLimit")),
+        "adds_limit_season": _int_or_none(acq.get("acquisitionLimit")),
         "current_day": data.get("scoringPeriodId"),
         "roster_entries": roster_entries,
     }

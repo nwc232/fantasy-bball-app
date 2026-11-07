@@ -119,3 +119,14 @@ def test_week_mapping_from_calendar_weeks():
     assert mp[4] == list(range(21, 28))                     # Mon 11/9 - Sun 11/15
     assert W.label(21, anchor) == {"dow": "Mon", "date": "11/9"}
     assert len(mp[17]) == 14                                # two-week matchup
+
+
+def test_float_add_counts_from_espn():
+    """ESPN can send the add limit / adds used as floats (7.0)."""
+    p, pool, sched = _ctx()
+    p = {**p, "adds_limit_period": 4.0,
+         "teams": [{**t, "adds_this_period": 1.0} for t in p["teams"]]}
+    r = S.plan(p, pool, sched, 1, p["current_period"])
+    assert r["adds_left"] == 3 and isinstance(r["adds_left"], int)
+    from app import espn
+    assert espn._int_or_none(7.0) == 7 and espn._int_or_none(None) is None
