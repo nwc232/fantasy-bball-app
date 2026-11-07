@@ -97,3 +97,17 @@ def test_uneven_trade_is_balanced():
     assert sb["auto_drops"][0]["id"] not in received        # never auto-drop who you just got
     off = c.post(f"/api/league/{key}/trade", json={**body, "fill": False}).json()
     assert off["sides"][0]["roster_size_after"] == sa["roster_limit"] - 1
+
+
+def test_empty_stat_windows_are_not_created():
+    """Zero-stat rows for injured rostered players must not invent a window
+    (e.g. 'last season' in the demo) that would project everyone at 0."""
+    from app.store import STORE
+    key = STORE.demo_league()
+    frames = STORE.leagues[key]["frames"]
+    assert set(frames) == {"season"}
+    for f in frames.values():
+        assert (f["g"] > 0).sum() > 100
+    j = c.get(f"/api/league/{key}?split=prev").json()
+    assert j["split"] == "season"
+    assert j["power"][0]["cats"]["pts"]["weekly"] > 0

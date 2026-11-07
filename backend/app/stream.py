@@ -302,7 +302,9 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
 
     # droppable: user's choice, else the 3 lowest-valued active players
     if droppable is None:
-        droppable = list(my_rows.sort_values("value").index[:3])
+        # default: the 3 lowest-valued players who are actually playing (an injured
+        # player with no stats this season is never a default drop)
+        droppable = list(my_rows[my_rows["g"] > 0].sort_values("value").index[:3])
     droppable = [d for d in droppable if d in my_base]
 
     # adds left

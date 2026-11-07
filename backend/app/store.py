@@ -23,7 +23,14 @@ def _clean(frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         if f is None or f.empty:
             continue
         f = f.drop_duplicates("id", keep="first").reset_index(drop=True)
-        out[k] = f[f["g"] > 0].reset_index(drop=True)
+        # keep rostered players with no games in this window (injured all season,
+        # etc.) as zero lines so rosters still show who they are
+        if not (f["g"] > 0).any():
+            continue                      # a window with no real stats isn't a window
+        keep = f["g"] > 0
+        if "fantasy_team" in f:
+            keep |= f["fantasy_team"] != 0
+        out[k] = f[keep].reset_index(drop=True)
     return out
 
 
@@ -105,6 +112,25 @@ class Store:
             base = frames
         roster = espn.players_to_frames(parsed["roster_entries"], year)
         owner = {r["id"]: t["id"] for t in parsed["teams"] for r in t["roster"]}
+        # every rostered player gets a row in every window, even with no stats in it
+        info = {}
+        for e in parsed["roster_entries"]:
+            p = e.get("player", e)
+            row = espn._player_row(p)
+            info[row["id"]] = row
+        zero = {k: 0.0 for k in ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov",
+                                  "fgm", "fga", "ftm", "fta", "mpg"]}
+        for k in list(espn.SPLITS):
+            have = set()
+            for part in (roster.get(k), base.get(k)):
+                if part is not None and not part.empty:
+                    have |= set(part["id"])
+            missing = [pid for pid in info if pid not in have]
+            if missing and have:          # only windows that actually have stats
+                extra = pd.DataFrame([{**info[pid], **zero, "g": 0, "status": "ONTEAM",
+                                       "fantasy_team": owner.get(pid, 0)} for pid in missing])
+                roster[k] = pd.concat([roster.get(k), extra], ignore_index=True) \
+                    if roster.get(k) is not None and not roster.get(k).empty else extra
         out = {}
         for k in set(base) | set(roster):
             parts = [f for f in (roster.get(k), base.get(k)) if f is not None and not f.empty]

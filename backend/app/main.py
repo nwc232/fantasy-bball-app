@@ -102,6 +102,7 @@ def _player_json(df: pd.DataFrame, cats: list[str], team_names: dict | None = No
             row["fantasy_team_name"] = team_names.get(ft_id, "FA")
         if "slot" in d:
             row["slot"] = d["slot"]
+        row["no_stats"] = int(d["g"]) == 0
         out.append(row)
     return out
 

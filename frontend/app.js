@@ -246,7 +246,7 @@ function playerRowHTML(p, cols, cats) {
   return cols.map((c) => {
     if (c.k === "name") {
       const owner = p.fantasy_team_name != null ? `<span class="owner"> · ${esc(p.fantasy_team_name)}</span>` : "";
-      return `<td class="l clickable" data-pid="${esc(p.id)}" title="Why is he ranked here?"><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""}<br><span class="meta">${esc(p.team)} · ${esc(p.pos)}</span>${owner}</td>`;
+      return `<td class="l clickable" data-pid="${esc(p.id)}" title="Why is he ranked here?"><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""}<br><span class="meta">${esc(p.team)} · ${esc(p.pos)}${p.no_stats ? " · no stats in this window" : ""}</span>${owner}</td>`;
     }
     if (c.k === "dz") {
       if (p.rank_z == null) return "<td></td>";
@@ -616,7 +616,7 @@ function renderTradeLists() {
     $(el).innerHTML = ps.map((p) => `<div class="prow ${give.has(p.id) ? "sel" : ""} ${drop.has(p.id) ? "drop" : ""}" data-id="${p.id}">
       <input type="checkbox" ${give.has(p.id) ? "checked" : ""} tabindex="-1">
       <div><span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""} <span class="meta">${esc(p.team)} · ${esc(p.pos)}</span></div>
-      <span class="v">#${p.rank} · ${p.value.toFixed(2)}</span>
+      <span class="v">${p.no_stats ? "no stats yet" : `#${p.rank} · ${p.value.toFixed(2)}`}</span>
       ${teamId === 0 ? "<span></span>" : `<button class="x" title="Drop this player">✕</button>`}
     </div>`).join("");
     $$(el + " .prow").forEach((row) => {
@@ -648,44 +648,65 @@ async function runTrade() {
 
 function renderTrade(r) {
   const n = S.league.teams.length;
+  const win = /MOST/.test(S.league.scoring_type || "");
+  const primary = win
+    ? { label: "Weekly win chance", get: (s) => s.allplay, fmt: (x) => `${x.toFixed(1)}%`, unit: " pts", even: 1.0, digits: 1 }
+    : { label: "Categories won per week", get: (s) => s.exp_cats, fmt: (x) => x.toFixed(2), unit: " cats", even: 0.05, digits: 2 };
+  const secondary = win
+    ? { label: "Cats per week", get: (s) => s.exp_cats, fmt: (x) => x.toFixed(2), digits: 2 }
+    : { label: "Weekly win chance", get: (s) => s.allplay, fmt: (x) => `${x.toFixed(1)}%`, digits: 1 };
+  const list = (arr) => arr.map((p) => `${esc(p.name)}`).join(", ") || "–";
+
   const side = (s) => {
-    const over = s.roster_size_after > s.roster_limit;
-    const list = (arr) => arr.map((p) => `${esc(p.name)} <span class="meta">#${p.rank ?? "–"}</span>`).join(", ") || "–";
-    return `<div class="card">
+    const [b, a] = primary.get(s), d = a - b;
+    const tone = Math.abs(d) < primary.even ? "even" : d > 0 ? "up" : "down";
+    const word = tone === "even" ? "About even" : tone === "up" ? "Better" : "Worse";
+    const cats = r.cats.map((c) => ({ c, b: s.cats[c].win_pct[0], a: s.cats[c].win_pct[1], d: s.cats[c].win_pct[1] - s.cats[c].win_pct[0] }))
+      .sort((x, y) => y.d - x.d);
+    const gains = cats.filter((x) => x.d >= 5 && !S.punts.has(x.c)).map((x) => LABEL[x.c]);
+    const losses = cats.filter((x) => x.d <= -5 && !S.punts.has(x.c)).reverse().map((x) => LABEL[x.c]);
+    const maxAbs = Math.max(30, ...cats.map((x) => Math.abs(x.d)));
+    const bar = (x) => {
+      const w = Math.min(Math.abs(x.d) / maxAbs, 1) * 50;
+      return `<div class="dbar"><span class="mid"></span>${Math.abs(x.d) >= 0.5
+        ? `<i class="${x.d > 0 ? "pos" : "neg"}" style="${x.d > 0 ? `left:50%` : `right:50%`};width:${w}%"></i>` : ""}</div>`;
+    };
+    return `<div class="card trade-card">
       <h2>${esc(s.name)}</h2>
-      <div class="meta">Gets: ${list(s.gets)}<br>Gives: ${list(s.gives)}${s.drops.length ? `<br>Drops: ${list(s.drops)}` : ""}</div>
-      ${s.auto_drops.length ? `<div class="callout">Over the roster limit, so drops <b>${list(s.auto_drops)}</b> (lowest value). Mark a different drop with ✕ to override.</div>` : ""}
-      ${s.auto_adds.length ? `<div class="callout">Open roster spot, filled with <b>${list(s.auto_adds)}</b>: the free agent who helps this team most.</div>` : ""}
-      ${s.auto_before_adds.length ? `<p class="note">Already had an open spot before the trade; assumed they'd add ${list(s.auto_before_adds)} either way.</p>` : ""}
-      ${over && !$("#tFill").checked ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}: mark someone to drop (✕), or turn on automatic fill/drop.</div>` : ""}
-      ${s.roster_size_after < s.roster_limit && !$("#tFill").checked ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}: the open spot is counted as empty.</div>` : ""}
-      <div class="verdict">
-        <div class="kpi"><div class="k">All-play win</div><div class="v">${s.allplay[1].toFixed(1)}% ${delta(s.allplay[0], s.allplay[1])}</div><div class="meta">was ${s.allplay[0].toFixed(1)}%</div></div>
-        <div class="kpi"><div class="k">Power rank</div><div class="v">${s.power_rank[1]} ${delta(s.power_rank[0], s.power_rank[1], 0, true)}</div><div class="meta">was ${s.power_rank[0]} of ${n}</div></div>
-        <div class="kpi"><div class="k">Cats / week</div><div class="v">${s.exp_cats[1].toFixed(2)} ${delta(s.exp_cats[0], s.exp_cats[1], 2)}</div></div>
-        <div class="kpi"><div class="k">Value</div><div class="v">${s.value_sum[1].toFixed(1)} ${delta(s.value_sum[0], s.value_sum[1])}</div></div>
+      <div class="swaps"><div><span class="k">Gets</span> ${list(s.gets)}${s.auto_adds.length ? ` <span class="auto">+ picks up ${list(s.auto_adds)}</span>` : ""}</div>
+        <div><span class="k">Gives</span> ${list(s.gives)}${s.drops.length ? `, drops ${list(s.drops)}` : ""}${s.auto_drops.length ? ` <span class="auto">+ drops ${list(s.auto_drops)}</span>` : ""}</div></div>
+      <div class="verdict-line ${tone}">
+        <div class="big">${word}</div>
+        <div><b>${primary.fmt(b)} → ${primary.fmt(a)}</b> ${primary.label.toLowerCase()}
+          <span class="${tone === "even" ? "meta" : tone}">(${d > 0 ? "+" : ""}${d.toFixed(primary.digits)}${primary.unit})</span><br>
+          <span class="meta">${gains.length ? `Gains ${gains.join(", ")}` : "No big category gains"}${losses.length ? ` · loses ${losses.join(", ")}` : ""}</span></div>
       </div>
-      <table class="grid"><thead><tr><th class="l">Cat</th><th>Weekly</th><th>After</th><th>Win % vs league</th><th>Change</th><th>Rank</th></tr></thead><tbody>
-      ${r.cats.map((c) => {
-        const x = s.cats[c];
-        const lower = c === "tov";
-        return `<tr class="${S.punts.has(c) ? "punted" : ""}"><td class="l"><b>${LABEL[c]}</b>${S.punts.has(c) ? ' <span class="meta">punted</span>' : ""}</td>
-          <td>${weekly(c, x.weekly[0])}</td><td>${weekly(c, x.weekly[1])}</td>
-          <td>${x.win_pct[0].toFixed(0)}% → <b>${x.win_pct[1].toFixed(0)}%</b></td>
-          <td>${delta(x.win_pct[0], x.win_pct[1])}</td>
-          <td>${x.rank[0]} → <b>${x.rank[1]}</b></td></tr>`;
-      }).join("")}</tbody></table>
+      <div class="cat-bars">
+        ${cats.map((x) => `<div class="cb ${S.punts.has(x.c) ? "punted" : ""}">
+          <span class="c">${LABEL[x.c]}${S.punts.has(x.c) ? ' <span class="meta">punt</span>' : ""}</span>
+          ${bar(x)}
+          <span class="d ${x.d >= 0.5 ? "up" : x.d <= -0.5 ? "down" : "meta"}">${Math.round(x.d) === 0 ? "0" : `${x.d > 0 ? "+" : ""}${Math.round(x.d)}`}</span>
+          <span class="p meta">${x.b.toFixed(0)}% → ${x.a.toFixed(0)}%</span></div>`).join("")}
+        <div class="cb-note meta">Chance of winning each category in a typical week vs a random league opponent.</div>
+      </div>
+      <div class="secondary meta">${secondary.label}: ${secondary.fmt(secondary.get(s)[0])} → ${secondary.fmt(secondary.get(s)[1])}
+        · power rank ${s.power_rank[0]} → ${s.power_rank[1]} of ${n}</div>
+      ${s.auto_before_adds.length ? `<p class="note">Already had an open spot, so the "before" numbers assume they'd add ${list(s.auto_before_adds)} anyway.</p>` : ""}
+      ${s.roster_size_after !== s.roster_limit && !$("#tFill").checked ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}. Turn on automatic fill/drop or mark drops with ✕.</div>` : ""}
+      <details class="more"><summary>Weekly totals and category ranks</summary>
+        <table class="grid"><thead><tr><th class="l">Cat</th><th>Weekly before</th><th>After</th><th>Rank</th></tr></thead><tbody>
+        ${r.cats.map((c) => { const x = s.cats[c]; return `<tr><td class="l"><b>${LABEL[c]}</b></td><td>${weekly(c, x.weekly[0])}</td><td>${weekly(c, x.weekly[1])}</td><td>${x.rank[0]} → <b>${x.rank[1]}</b></td></tr>`; }).join("")}
+        <tr><td class="l meta">Roster value (${esc($("#system").selectedOptions[0].textContent)})</td><td>${s.value_sum[0].toFixed(1)}</td><td>${s.value_sum[1].toFixed(1)}</td><td></td></tr>
+        </tbody></table></details>
     </div>`;
   };
-  const movers = r.league.filter((t) => t.rank[0] !== t.rank[1]);
   $("#tResult").innerHTML = `<div class="result-grid">${r.sides.map(side).join("")}</div>
-    <h3>League power rankings after the trade</h3>
-    <div class="table-wrap"><table class="grid"><thead><tr><th>Rank</th><th class="l">Team</th><th>Was</th><th>All-play</th></tr></thead><tbody>
+    <details class="more" style="margin-top:14px"><summary>League power rankings after the trade</summary>
+    <div class="table-wrap"><table class="grid"><thead><tr><th>Rank</th><th class="l">Team</th><th>Was</th><th>Win chance</th></tr></thead><tbody>
     ${r.league.map((t) => `<tr class="${t.team_id === S.myTeam ? "mine" : ""}"><td><b>${t.rank[1]}</b></td><td class="l">${esc(t.name)}</td>
       <td>${t.rank[0]} ${t.rank[0] !== t.rank[1] ? delta(t.rank[0], t.rank[1], 0, true) : ""}</td>
       <td>${t.allplay[1].toFixed(1)}% ${delta(t.allplay[0], t.allplay[1])}</td></tr>`).join("")}
-    </tbody></table></div>
-    <p class="note">${movers.length ? "" : "No team changes rank. "}Category win % = chance of winning that category against a random league opponent in a typical week.</p>`;
+    </tbody></table></div></details>`;
 }
 
 /* ---------- method ---------- */

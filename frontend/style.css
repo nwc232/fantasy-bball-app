@@ -155,6 +155,37 @@ button.ghost { background: var(--panel); border: 1px solid var(--line); color: v
 .down { color: rgb(var(--bad)); }
 .warn { color: rgb(var(--bad)); font-size: 12px; margin: 6px 0; }
 
+/* trade result */
+.trade-card h2 { margin-bottom: 6px; }
+.swaps { font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+.swaps .k { display: inline-block; width: 44px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.swaps .auto { color: var(--muted); font-size: 12px; }
+.verdict-line { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; padding: 12px 14px;
+  border-radius: 10px; background: var(--bg); border-left: 4px solid var(--muted); margin-bottom: 14px; font-size: 14px; }
+.verdict-line.up { border-left-color: rgb(var(--good)); }
+.verdict-line.down { border-left-color: rgb(var(--bad)); }
+.verdict-line .big { font-size: 20px; font-weight: 700; }
+.verdict-line.up .big { color: rgb(var(--good)); }
+.verdict-line.down .big { color: rgb(var(--bad)); }
+.cat-bars { display: flex; flex-direction: column; gap: 4px; }
+.cb { display: grid; grid-template-columns: 52px 1fr 40px 92px; gap: 10px; align-items: center; font-size: 13px;
+  font-variant-numeric: tabular-nums; }
+.cb .c { font-weight: 600; }
+.cb .d { text-align: right; font-weight: 700; }
+.cb .p { text-align: right; font-size: 12px; }
+.cb.punted { opacity: .4; }
+.dbar { position: relative; height: 12px; background: var(--bg); border-radius: 3px; }
+.dbar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line); }
+.dbar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.dbar i.pos { background: rgb(var(--good)); }
+.dbar i.neg { background: rgb(var(--bad)); }
+.cb-note { font-size: 11px; margin-top: 4px; }
+.secondary { font-size: 12px; margin-top: 12px; }
+.more { margin-top: 10px; font-size: 13px; }
+.more summary { cursor: pointer; color: var(--muted); }
+.more table { margin-top: 8px; }
+.meta.even, .even { color: var(--muted); }
+
 /* streaming */
 .s-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; margin: 6px 0 14px; }
 .s-head h2 { margin: 0; }

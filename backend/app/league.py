@@ -250,6 +250,8 @@ def balance_rosters(league: dict, pool: pd.DataFrame, cats: list[str], team_ids:
     for tid in team_ids:                       # drops first
         while len(active(tid)) > limit:
             cand = [r["id"] for r in active(tid) if r["id"] not in protect.get(tid, set())]
+            playing = [pid for pid in cand if float(pv["g"].get(pid, 0) or 0) > 0]
+            cand = playing or cand        # don't auto-drop injured players with no stats
             if not cand:
                 break
             worst = min(cand, key=lambda pid: float(val.get(pid, -99)))
