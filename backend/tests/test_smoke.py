@@ -80,3 +80,20 @@ def test_explain_and_refresh():
     assert {p["key"] for p in e["presets"]} == {"tz", "z", "g", "durant", "durant_h2h"}
     key = c.post("/api/league/demo").json()["key"]
     assert "updated" in c.post(f"/api/league/{key}/refresh").json()
+
+
+def test_uneven_trade_is_balanced():
+    key = c.post("/api/league/demo").json()["key"]
+    j = c.get(f"/api/league/{key}").json()
+    a, b = j["teams"][0], j["teams"][1]
+    body = {"team_a": a["id"], "team_b": b["id"],
+            "a_gives": [a["players"][1]["id"], a["players"][2]["id"]],
+            "b_gives": [b["players"][0]["id"]]}
+    r = c.post(f"/api/league/{key}/trade", json=body).json()
+    sa, sb = r["sides"]
+    assert sa["roster_size_after"] == sa["roster_limit"] and len(sa["auto_adds"]) == 1
+    assert sb["roster_size_after"] == sb["roster_limit"] and len(sb["auto_drops"]) == 1
+    received = {p["id"] for p in sb["gets"]}
+    assert sb["auto_drops"][0]["id"] not in received        # never auto-drop who you just got
+    off = c.post(f"/api/league/{key}/trade", json={**body, "fill": False}).json()
+    assert off["sides"][0]["roster_size_after"] == sa["roster_limit"] - 1

@@ -398,6 +398,12 @@ async function loadLeague(first) {
   $("#ownerFilter").innerHTML = `<option value="">All players</option><option value="fa">Free agents</option>` +
     L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   $("#period").innerHTML = L.periods.map((n) => `<option value="${n}">Week ${n}${n === L.current_period ? " (current)" : ""}</option>`).join("");
+  if (!S.stream) {
+    const up = L.periods.filter((n) => n >= L.current_period).slice(0, 3);
+    const keep = $("#sWeek").value;
+    $("#sWeek").innerHTML = up.map((n, i) => `<option value="${n}">Week ${n}${i === 0 ? " (this week)" : ""}</option>`).join("");
+    if (keep && up.includes(+keep)) $("#sWeek").value = keep;
+  }
   $("#period").value = L.period;
   $("#leagueChip").textContent = `League: ${L.name}`;
   renderUpdated();
@@ -632,7 +638,7 @@ async function runTrade() {
   if (!T.aGive.size && !T.bGive.size) { $("#tMsg").textContent = "Tick at least one player."; return; }
   $("#tMsg").textContent = "Simulating…";
   const body = { ...params(), team_a: T.a, team_b: T.b, a_gives: [...T.aGive], b_gives: [...T.bGive],
-    a_drops: [...T.aDrop], b_drops: [...T.bDrop] };
+    a_drops: [...T.aDrop], b_drops: [...T.bDrop], fill: $("#tFill").checked };
   try {
     const r = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/trade`, { method: "POST", body: JSON.stringify(body) });
     $("#tMsg").textContent = "";
@@ -648,7 +654,11 @@ function renderTrade(r) {
     return `<div class="card">
       <h2>${esc(s.name)}</h2>
       <div class="meta">Gets: ${list(s.gets)}<br>Gives: ${list(s.gives)}${s.drops.length ? `<br>Drops: ${list(s.drops)}` : ""}</div>
-      ${over ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}: mark someone to drop (✕) for an accurate read.</div>` : ""}
+      ${s.auto_drops.length ? `<div class="callout">Over the roster limit, so drops <b>${list(s.auto_drops)}</b> (lowest value). Mark a different drop with ✕ to override.</div>` : ""}
+      ${s.auto_adds.length ? `<div class="callout">Open roster spot, filled with <b>${list(s.auto_adds)}</b>: the free agent who helps this team most.</div>` : ""}
+      ${s.auto_before_adds.length ? `<p class="note">Already had an open spot before the trade; assumed they'd add ${list(s.auto_before_adds)} either way.</p>` : ""}
+      ${over && !$("#tFill").checked ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}: mark someone to drop (✕), or turn on automatic fill/drop.</div>` : ""}
+      ${s.roster_size_after < s.roster_limit && !$("#tFill").checked ? `<div class="warn">Roster would be ${s.roster_size_after}/${s.roster_limit}: the open spot is counted as empty.</div>` : ""}
       <div class="verdict">
         <div class="kpi"><div class="k">All-play win</div><div class="v">${s.allplay[1].toFixed(1)}% ${delta(s.allplay[0], s.allplay[1])}</div><div class="meta">was ${s.allplay[0].toFixed(1)}%</div></div>
         <div class="kpi"><div class="k">Power rank</div><div class="v">${s.power_rank[1]} ${delta(s.power_rank[0], s.power_rank[1], 0, true)}</div><div class="meta">was ${s.power_rank[0]} of ${n}</div></div>

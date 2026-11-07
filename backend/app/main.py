@@ -381,6 +381,7 @@ class TradeBody(BaseModel):
     transform: int | None = None
     weights: str | None = None
     tov: float | None = None
+    fill: bool = True
 
 
 @app.post("/api/league/{key}/trade")
@@ -389,7 +390,7 @@ def trade(key: str, body: TradeBody):
     if not body.a_gives and not body.b_gives:
         raise HTTPException(400, "Pick at least one player to move.")
     rep = L.trade_report(p, pool, p["cats"], body.team_a, body.team_b, body.a_gives,
-                         body.b_gives, body.a_drops, body.b_drops)
+                         body.b_gives, body.a_drops, body.b_drops, fill=body.fill)
     rep["cats"] = p["cats"]
     rep["punts"] = punts
     return rep

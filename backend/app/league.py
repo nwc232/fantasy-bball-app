@@ -207,10 +207,101 @@ def apply_trade(league: dict, team_a: int, team_b: int, a_gives: list[str], b_gi
     return new
 
 
+# --------------------------------------------------------------------------- #
+# Roster balancing: uneven trades leave one team over the limit and one short
+# --------------------------------------------------------------------------- #
+def _team_odds(rows: pd.DataFrame, starters: int, cats: list[str], opp_mu: np.ndarray,
+               opp_var: np.ndarray, objective: str) -> float:
+    """Typical-week odds vs every other team, analytic (fast enough to try many FAs)."""
+    g = games_in_period(rows, None, None, starters)
+    mu, var = project(rows, g, cats)
+    sign = np.array([SIGN[c] for c in cats])
+    p = norm.cdf(sign * (mu - opp_mu) / np.sqrt(var + opp_var + 1e-12))     # opp x cats
+    if objective == "cats":
+        return float(p.sum(axis=1).mean())
+    n = len(cats)
+    k = np.arange(n + 1)
+    wins = []
+    for row in p:
+        dist = np.array([1.0])
+        for q in row:
+            dist = np.convolve(dist, [1 - q, q])
+        wins.append(dist[k * 2 > n].sum() + 0.5 * dist[k * 2 == n].sum())
+    return float(np.mean(wins))
+
+
+def balance_rosters(league: dict, pool: pd.DataFrame, cats: list[str], team_ids: list[int],
+                    protect: dict[int, set] | None = None, max_fa: int = 30) -> tuple[dict, dict]:
+    """Make each listed team's active (non-IR) roster exactly the league size:
+    over -> drop the lowest-valued player (never one in `protect`);
+    under -> add the free agent (incl. waivers) who most improves that team's
+    typical-week odds against the rest of the league."""
+    protect = protect or {}
+    limit = league["roster_size"]
+    objective = "win" if "MOST" in (league.get("scoring_type") or "") else "cats"
+    teams = {t["id"]: {**t, "roster": list(t["roster"])} for t in league["teams"]}
+    auto = {tid: {"drops": [], "adds": []} for tid in team_ids}
+    pv = pool.drop_duplicates("id").set_index("id")
+    val = pv["value"]
+
+    def active(tid):
+        return [r for r in teams[tid]["roster"] if r.get("slot") != IR_SLOT]
+
+    for tid in team_ids:                       # drops first
+        while len(active(tid)) > limit:
+            cand = [r["id"] for r in active(tid) if r["id"] not in protect.get(tid, set())]
+            if not cand:
+                break
+            worst = min(cand, key=lambda pid: float(val.get(pid, -99)))
+            teams[tid]["roster"] = [r for r in teams[tid]["roster"] if r["id"] != worst]
+            auto[tid]["drops"].append(worst)
+
+    rostered = {r["id"] for t in teams.values() for r in t["roster"]}
+    status = pv["status"] if "status" in pv else pd.Series("FREEAGENT", index=pv.index)
+    inj = pv["inj_status"] if "inj_status" in pv else pd.Series("ACTIVE", index=pv.index)
+    gmin = max(1, int(np.ceil(E.ELIG_FRAC * pv["g"].max()))) if len(pv) else 1   # no tiny samples
+    fa = pv[(pv["fantasy_team"] == 0) & status.isin(["FREEAGENT", "WAIVERS"]) & (inj != "OUT")
+            & (pv["g"] >= gmin)]
+    fa_ids = [pid for pid in fa.sort_values("value", ascending=False).index if pid not in rostered]
+
+    for tid in team_ids:                       # then fill open spots
+        while len(active(tid)) < limit and fa_ids:
+            others = [t for t in teams if t != tid]
+            om, ov = [], []
+            for o in others:
+                rows = roster_rows(teams[o], pool)
+                g = games_in_period(rows, None, None, league["starters"])
+                m, v = project(rows, g, cats)
+                om.append(m); ov.append(v)
+            om, ov = np.array(om), np.array(ov)
+            best, best_s = None, -1e9
+            for pid in fa_ids[:max_fa]:
+                trial = {**teams[tid], "roster": teams[tid]["roster"] + [{"id": pid, "slot": BENCH_SLOT}]}
+                s = _team_odds(roster_rows(trial, pool), league["starters"], cats, om, ov, objective)
+                if s > best_s:
+                    best, best_s = pid, s
+            teams[tid]["roster"].append({"id": best, "slot": BENCH_SLOT})
+            auto[tid]["adds"].append(best)
+            fa_ids.remove(best)
+
+    return {**league, "teams": [teams[t["id"]] for t in league["teams"]]}, auto
+
+
 def trade_report(league: dict, pool: pd.DataFrame, cats: list[str], team_a: int, team_b: int,
-                 a_gives, b_gives, a_drops, b_drops) -> dict:
-    before_r = {t["id"]: roster_rows(t, pool) for t in league["teams"]}
+                 a_gives, b_gives, a_drops, b_drops, fill: bool = True) -> dict:
+    involved = [team_a] + ([team_b] if team_b else [])
     after_league = apply_trade(league, team_a, team_b, a_gives, b_gives, a_drops, b_drops)
+    auto_before = {tid: {"drops": [], "adds": []} for tid in involved}
+    auto_after = {tid: {"drops": [], "adds": []} for tid in involved}
+    if fill:
+        # same treatment before and after, so a team that already had an empty
+        # spot doesn't make the trade look better than it is
+        league, auto_before = balance_rosters(league, pool, cats, involved)
+        protect = {team_a: set(b_gives)}
+        if team_b:
+            protect[team_b] = set(a_gives)
+        after_league, auto_after = balance_rosters(after_league, pool, cats, involved, protect)
+    before_r = {t["id"]: roster_rows(t, pool) for t in league["teams"]}
     after_r = {t["id"]: roster_rows(t, pool) for t in after_league["teams"]}
     before = {r["team_id"]: r for r in power_table(league, before_r, cats)}
     after = {r["team_id"]: r for r in power_table(after_league, after_r, cats)}
@@ -218,8 +309,13 @@ def trade_report(league: dict, pool: pd.DataFrame, cats: list[str], team_a: int,
 
     def side(tid, gives, gets, drops):
         b, a = before[tid], after[tid]
-        roster_n = len([r for r in after_league["teams"] if r["id"] == tid][0]["roster"])
+        roster_n = len([r for r in [x for x in after_league["teams"] if x["id"] == tid][0]["roster"]
+                        if r.get("slot") != IR_SLOT])
         return {
+            "auto_drops": [_pinfo(pmap, p) for p in auto_after[tid]["drops"]],
+            "auto_adds": [_pinfo(pmap, p) for p in auto_after[tid]["adds"]],
+            "auto_before_adds": [_pinfo(pmap, p) for p in auto_before[tid]["adds"]],
+            "auto_before_drops": [_pinfo(pmap, p) for p in auto_before[tid]["drops"]],
             "team_id": tid, "name": b["name"],
             "gives": [_pinfo(pmap, p) for p in gives], "gets": [_pinfo(pmap, p) for p in gets],
             "drops": [_pinfo(pmap, p) for p in drops],
