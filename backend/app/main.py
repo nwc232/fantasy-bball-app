@@ -23,6 +23,33 @@ from .store import STORE, current_year
 app = FastAPI(title="Fantasy Category Rankings")
 log = logging.getLogger("categorylab")
 
+# Optional site password (HTTP basic auth). Set APP_PASSWORD on the host to turn
+# it on; any username works. Leave it unset when running locally.
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+
+
+@app.middleware("http")
+async def _password_gate(request: Request, call_next):
+    if not APP_PASSWORD or request.url.path == "/api/health":
+        return await call_next(request)
+    import base64
+    import secrets
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("basic "):
+        try:
+            _, _, pw = base64.b64decode(header[6:]).decode().partition(":")
+            if secrets.compare_digest(pw, APP_PASSWORD):
+                return await call_next(request)
+        except Exception:
+            pass
+    return JSONResponse(status_code=401, content={"detail": "Password required"},
+                        headers={"WWW-Authenticate": 'Basic realm="Category Lab"'})
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True}
+
 
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):

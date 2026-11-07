@@ -25,11 +25,18 @@ uvicorn app.main:app --reload
 ```
 Click **Try the demo league** on the League tab to see every feature with 2025-26 data and no ESPN account.
 
-## Deploy (free)
-- **Render**: push this folder to a GitHub repo, then New → Blueprint → pick the repo. `render.yaml` and the `Dockerfile` handle the rest.
-- **Fly.io / Railway**: deploy the `Dockerfile` as-is. It listens on `$PORT`.
+## Deploy (free, on Render)
+1. Sign in at render.com with GitHub.
+2. Click **New → Blueprint** and pick this repo. Render reads `render.yaml` and asks for **APP_PASSWORD**. Set one: it's the password the site asks for, and any username works.
+3. Click **Apply**. The first build takes a few minutes, and then you get a URL like `https://category-lab.onrender.com`.
+4. Every push to `main` redeploys automatically.
 
-Live stats come from ESPN's fantasy API, which works from cloud hosts. stats.nba.com blocks most datacenter IPs, so it isn't used. If ESPN can't be reached, the site falls back to the bundled 2025-26 season and says so in the header.
+Free-tier notes:
+- The service sleeps after about 15 minutes idle, so the first visit after that takes 30-60 seconds to wake up.
+- Imported leagues are kept in memory, so they're lost when it sleeps or redeploys. Tick **Remember on this device** when importing and the page re-imports by itself.
+- Render's $7/month Starter plan doesn't sleep.
+
+Any Docker host works too (Fly.io, Railway, etc.): deploy the `Dockerfile` and set `PORT` and `APP_PASSWORD`. Without `APP_PASSWORD` the site is open to anyone with the URL, which is fine locally.
 
 ## Importing a private ESPN league
 1. Find the League ID in your league URL (`leagueId=…`).

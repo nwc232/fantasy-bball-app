@@ -111,3 +111,16 @@ def test_empty_stat_windows_are_not_created():
     j = c.get(f"/api/league/{key}?split=prev").json()
     assert j["split"] == "season"
     assert j["power"][0]["cats"]["pts"]["weekly"] > 0
+
+
+def test_password_gate(monkeypatch):
+    import base64
+    from app import main as M
+    monkeypatch.setattr(M, "APP_PASSWORD", "hoops")
+    assert c.get("/api/health").status_code == 200                  # health check stays open
+    r = c.get("/api/meta")
+    assert r.status_code == 401 and "Basic" in r.headers["www-authenticate"]
+    bad = base64.b64encode(b"x:nope").decode()
+    assert c.get("/api/meta", headers={"Authorization": f"Basic {bad}"}).status_code == 401
+    ok = base64.b64encode(b"anyone:hoops").decode()
+    assert c.get("/api/meta", headers={"Authorization": f"Basic {ok}"}).status_code == 200

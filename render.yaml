@@ -3,4 +3,7 @@ services:
     name: category-lab
     runtime: docker
     plan: free
-    healthCheckPath: /api/meta
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_PASSWORD
+        sync: false        # Render asks you for the value when you create the service

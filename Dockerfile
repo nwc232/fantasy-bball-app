@@ -6,4 +6,5 @@ COPY backend backend
 COPY frontend frontend
 WORKDIR /app/backend
 ENV PORT=8000
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+# --proxy-headers: Render terminates HTTPS in front of the app
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips="*"
