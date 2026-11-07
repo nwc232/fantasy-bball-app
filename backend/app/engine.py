@@ -81,9 +81,13 @@ class System:
 
 
 SYSTEMS = {
-    "tz": System("tz", "Category Lab (recommended)", transform=True, tov=0.5,
+    "durant_h2h": System("durant_h2h", "DURANT H2H", reference="nba", transform=True,
+                         weights="durant_h2h", tov=0.0, minus_one=True,
+                         blurb="Josh Lloyd: transform vs the whole NBA, H2H weights, no TO, "
+                               "worst category dropped."),
+    "tz": System("tz", "Category Lab", transform=True, tov=0.5,
                  blurb="DURANT's transform and half-weight turnovers, scaled against rostered "
-                       "players, equal weights, no Minus 1. Best in both 2025-26 draft simulations."),
+                       "players, equal weights, no Minus 1. Did best in the 2025-26 draft simulations."),
     "z": System("z", "Standard 9-cat (Z)",
                 blurb="Z-score vs the top rostered players, averaged. What Yahoo/ESPN/BBM show."),
     "g": System("g", "G-score (H2H)", weights="variance",
@@ -92,14 +96,12 @@ SYSTEMS = {
                      minus_one=True,
                      blurb="Josh Lloyd: transform vs the whole NBA, TO at half weight, "
                            "worst category dropped."),
-    "durant_h2h": System("durant_h2h", "DURANT H2H", reference="nba", transform=True,
-                         weights="durant_h2h", tov=0.0, minus_one=True,
-                         blurb="Josh Lloyd: transform vs the whole NBA, H2H weights, no TO, "
-                               "worst category dropped."),
 }
 
+DEFAULT_SYSTEM = "durant_h2h"
 
-def make_system(base: str | System = "tz", **overrides) -> System:
+
+def make_system(base: str | System = "durant_h2h", **overrides) -> System:
     sy = SYSTEMS[base] if isinstance(base, str) else base
     ov = {k: v for k, v in overrides.items() if v is not None}
     if not ov:

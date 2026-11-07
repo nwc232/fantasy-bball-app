@@ -55,7 +55,7 @@ function syncSystemSelect() {
 function params() {
   const sp = readSpec();
   return {
-    system: S.base || "tz",
+    system: S.base || S.meta.default_system,
     split: $("#split").value,
     punt: [...S.punts].join(","),
     m1: sp.minus_one ? 1 : 0, ref: sp.reference, center: sp.center, weights: sp.weights,
@@ -100,8 +100,10 @@ async function init() {
   $("#o_center").innerHTML = Object.entries(O.center).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#o_weights").innerHTML = Object.entries(O.weights).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#o_tov").innerHTML = Object.entries(O.tov).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
-  S.base = store.get("system", "tz");
-  if (!S.meta.systems.find((s) => s.key === S.base)) S.base = "tz";
+  // prefs v2: default moved to DURANT H2H, so reset any older saved system once
+  if (store.get("prefsVersion", 1) < 2) { store.del("system"); store.del("spec"); store.set("prefsVersion", 2); }
+  S.base = store.get("system", S.meta.default_system);
+  if (!S.meta.systems.find((s) => s.key === S.base)) S.base = S.meta.default_system;
   writeSpec(store.get("spec", S.meta.systems.find((s) => s.key === S.base).spec));
   syncSystemSelect();
   $("#split").value = store.get("split", "season");
@@ -304,7 +306,7 @@ function bindExplain(table) {
 function closeExplain() { $("#explain").classList.add("hidden"); }
 async function openExplain(pid, target) {
   const curKey = $("#system").value;
-  target = target || (curKey === "durant_h2h" ? "tz" : "durant_h2h");
+  target = target || (curKey === S.meta.default_system ? "tz" : S.meta.default_system);
   $("#explain").classList.remove("hidden");
   $("#exBody").innerHTML = `<p class="meta">Re-ranking the player pool under each setting…</p>`;
   const p = { ...params(), player: pid, target, teams: $("#teams").value, roster: $("#roster").value, league: S.leagueKey };
@@ -568,7 +570,7 @@ function renderTrade(r) {
 function renderMethod() {
   $("#methodText").innerHTML = `
   <h2>How a ranking is built</h2>
-  <p>Each player's per-game line becomes one number per category, and the categories are averaged. Every system is a preset of the switches under <b>Model settings</b>:</p>
+  <p>Each player's per-game line becomes one number per category, and the categories are averaged. Every system is a preset of the switches under <b>Model settings</b>. The default is DURANT H2H.</p>
   <ul>
     <li><b>Scale against</b> sets the spread that converts each category into a common unit. <i>Rostered players</i> uses the top teams × roster. <i>Rostered + waiver pool</i> uses 1.5× that. <i>Whole NBA</i> (DURANT) uses every eligible player.</li>
     <li><b>Zero point</b> sets what counts as 0: the pool average, or the waiver tier (so values read "better than a pickup"). It doesn't change a straight ranking, but it changes which category Minus 1 drops.</li>
@@ -585,7 +587,7 @@ function renderMethod() {
   <table>
     <tr><th>Settings</th><th>Perfect info</th><th>Real-world</th></tr>
     <tr><td>Standard Z (rostered)</td><td>56.8</td><td>57.2</td></tr>
-    <tr><td><b>Transform + rostered + TO ½ (Category Lab)</b></td><td><b>62.8</b></td><td><b>68.5</b></td></tr>
+    <tr><td><b>Transform + rostered + TO ½ (Category Lab preset)</b></td><td><b>62.8</b></td><td><b>68.5</b></td></tr>
     <tr><td>Transform + rostered, TO full</td><td>60.9</td><td>62.1</td></tr>
     <tr><td>Transform + rostered + waivers</td><td>56.8</td><td>61.3</td></tr>
     <tr><td>Transform + whole NBA</td><td>49.7</td><td>52.4</td></tr>

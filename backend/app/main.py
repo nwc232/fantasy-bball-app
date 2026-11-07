@@ -80,6 +80,7 @@ def _player_json(df: pd.DataFrame, cats: list[str], team_names: dict | None = No
 def meta():
     return {
         "year": current_year(),
+        "default_system": E.DEFAULT_SYSTEM,
         "systems": [{"key": s.key, "label": s.label, "blurb": s.blurb, "spec": s.spec()}
                     for s in E.SYSTEMS.values()],
         "options": {"reference": E.REFERENCES, "weights": E.WEIGHT_LABELS,
@@ -91,7 +92,7 @@ def meta():
 
 
 @app.get("/api/rankings")
-def rankings(year: int = 0, split: str = "season", system: str = "tz", punt: str = "",
+def rankings(year: int = 0, split: str = "season", system: str = E.DEFAULT_SYSTEM, punt: str = "",
              teams: int = 12, roster: int = 13, league: str | None = None,
              refresh: bool = False, m1: int | None = None, ref: str | None = None,
              center: str | None = None, transform: int | None = None,
@@ -159,7 +160,7 @@ def _league_ctx(key: str, split: str, sy: E.System, punt: str):
 
 
 @app.get("/api/league/{key}")
-def league_view(key: str, split: str = "season", system: str = "tz", punt: str = "",
+def league_view(key: str, split: str = "season", system: str = E.DEFAULT_SYSTEM, punt: str = "",
                 period: int = 0, m1: int | None = None, ref: str | None = None,
                 center: str | None = None, transform: int | None = None,
                 weights: str | None = None, tov: float | None = None):
@@ -233,7 +234,7 @@ def _switch_label(k: str, v) -> str:
 
 @app.get("/api/explain")
 def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str = "season",
-            system: str = "tz", punt: str = "", teams: int = 12, roster: int = 13,
+            system: str = E.DEFAULT_SYSTEM, punt: str = "", teams: int = 12, roster: int = 13,
             league: str | None = None, m1: int | None = None, ref: str | None = None,
             center: str | None = None, transform: int | None = None,
             weights: str | None = None, tov: float | None = None):
@@ -306,7 +307,7 @@ class TradeBody(BaseModel):
     a_drops: list[str] = []
     b_drops: list[str] = []
     split: str = "season"
-    system: str = "tz"
+    system: str = E.DEFAULT_SYSTEM
     punt: str = ""
     m1: int | None = None
     ref: str | None = None
