@@ -91,3 +91,31 @@ def test_stream_endpoint():
     assert r.status_code == 200
     j = r.json()
     assert j["opponent"]["id"] != 1 and j["board"]
+
+
+def test_adds_today_wait_for_tomorrow_once_games_tip():
+    p, pool, sched = _ctx()
+    today = p["current_day"]
+    # pretend one of today's games has already tipped off
+    tipped = {t: dict(days) for t, days in sched.items()}
+    first = next(t for t, days in tipped.items() if today in days)
+    tipped[first][today] = 1_000
+    r = S.plan(p, pool, tipped, 1, p["current_period"], adds_left=4)
+    assert r["add_locked_today"] is True
+    today_label = r["week_days"][r["today_index"]]
+    assert all(m["day"] != today_label for m in r["moves"])
+
+
+def test_week_mapping_from_calendar_weeks():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app import weeks as W
+    et = ZoneInfo("America/New_York")
+    ms = lambda y, m, d: int(datetime(y, m, d, 19, tzinfo=et).timestamp() * 1000)
+    anchor = W.anchor_from_schedule({"BOS": {1: ms(2026, 10, 20)}})      # opening night, a Tuesday
+    mp, how = W.build({1: [1], 2: [2], 3: [3], 4: [4], 17: [17, 18]}, {3: [14, 15]}, 1, 170, anchor)
+    assert how == "calendar"
+    assert mp[1] == list(range(1, 7))                       # Tue-Sun opening week
+    assert mp[4] == list(range(21, 28))                     # Mon 11/9 - Sun 11/15
+    assert W.label(21, anchor) == {"dow": "Mon", "date": "11/9"}
+    assert len(mp[17]) == 14                                # two-week matchup

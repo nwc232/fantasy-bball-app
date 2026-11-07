@@ -6,7 +6,7 @@ from datetime import date
 
 import pandas as pd
 
-from . import demo, espn
+from . import demo, espn, weeks
 
 POOL_TTL = 20 * 60
 LEAGUE_TTL = 10 * 60
@@ -79,10 +79,23 @@ class Store:
             parsed["week_box"] = {}
         frames = self._league_frames(parsed, pool_raw, year)
         key = f"{league_id}-{year}"
-        self.leagues[key] = {"parsed": parsed, "frames": frames, "sched": self.schedule(year),
+        sched = self.schedule(year)
+        self._map_weeks(parsed, sched)
+        self.leagues[key] = {"parsed": parsed, "frames": frames, "sched": sched,
                              "creds": (league_id, year, espn_s2, swid), "ts": time.time(),
                              "source": "ESPN league"}
         return key
+
+    @staticmethod
+    def _map_weeks(parsed: dict, sched: dict, anchor=None) -> None:
+        anchor = anchor or weeks.anchor_from_schedule(sched)
+        last = parsed.get("last_day") or max(
+            (max(v) for v in sched.values() if v), default=parsed.get("current_day") or 170)
+        mp, how = weeks.build(parsed["matchup_periods_raw"], parsed.get("observed_days") or {},
+                              parsed.get("first_day") or 1, last, anchor)
+        parsed["matchup_periods"] = mp
+        parsed["weeks_source"] = how
+        parsed["anchor"] = anchor
 
     def _league_frames(self, parsed: dict, pool_raw: list, year: int) -> dict:
         if pool_raw:
@@ -112,8 +125,10 @@ class Store:
         parsed = espn.parse_league(d["league"], demo.YEAR)
         parsed["week_box"] = {}
         frames = self._league_frames(parsed, players, demo.YEAR)
+        sched = espn.parse_pro_schedule(d["pro_schedule"])
+        self._map_weeks(parsed, sched, anchor=d["anchor"])
         self.leagues["demo"] = {"parsed": parsed, "frames": frames,
-                                "sched": espn.parse_pro_schedule(d["pro_schedule"]),
+                                "sched": sched,
                                 "creds": None, "ts": time.time(),
                                 "source": "Demo league built from the 2025-26 season"}
         return "demo"

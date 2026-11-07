@@ -5,8 +5,12 @@ import time
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+import logging
+import math
+import traceback
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,6 +21,32 @@ from . import stream as ST
 from .store import STORE, current_year
 
 app = FastAPI(title="Fantasy Category Rankings")
+log = logging.getLogger("categorylab")
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    """Show the real error in the UI (and the full traceback in the server log)
+    instead of a bare 500."""
+    log.error("Unhandled error on %s\n%s", request.url.path, traceback.format_exc())
+    return JSONResponse(status_code=500, content={
+        "detail": f"Server error ({type(exc).__name__}): {exc}. "
+                  "The full traceback is in the terminal running the server."})
+
+
+def _json_safe(o):
+    """NaN/inf -> None so a stray missing stat can't break the JSON response."""
+    if isinstance(o, float):
+        return None if (math.isnan(o) or math.isinf(o)) else o
+    if isinstance(o, dict):
+        return {k: _json_safe(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_json_safe(v) for v in o]
+    if isinstance(o, (np.floating,)):
+        return _json_safe(float(o))
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    return o
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 
 STAT_COLS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov"]
@@ -332,7 +362,7 @@ def stream(key: str, body: StreamBody):
         raise HTTPException(400, str(e))
     res["split"] = used
     res["periods"] = [x for x in sorted(p["matchup_periods"]) if x >= p["current_period"]][:3]
-    return res
+    return _json_safe(res)
 
 
 class TradeBody(BaseModel):

@@ -35,6 +35,7 @@ from scipy.optimize import linear_sum_assignment
 from scipy.stats import norm
 
 from . import engine as E
+from . import weeks as W
 
 STATS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov", "fgm", "fga", "ftm", "fta"]
 SI = {s: i for i, s in enumerate(STATS)}
@@ -264,6 +265,13 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
     is_current = period == p["current_period"]
     today = cur_day if is_current else None
     days = [d for d in week if (today is None or d >= today)]
+    anchor = p.get("anchor")
+    now_ms = int(time.time() * 1000)
+    # ESPN: once any game today has tipped off, a player added today can't play until tomorrow
+    tips_today = [g.get(today) for g in sched.values()
+                  if isinstance(g, dict) and today is not None and g.get(today)]
+    add_locked_today = (mode == "tomorrow") or (
+        mode == "auto" and any(t <= now_ms for t in tips_today))
 
     slot_list = [s for s, n in sorted(p["slot_counts"].items()) for _ in range(int(n))]
     objective = "win" if "MOST" in (p.get("scoring_type") or "") else "cats"
@@ -326,6 +334,8 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
             if y in added:
                 continue
             for d in ctx.game_days(y):
+                if add_locked_today and d == today:
+                    continue
                 for x in [x for x in rosters[d] if x in droppable or x in added]:
                     mv = Move(d, x, y)
                     ev = evaluate(ctx, my_base, moves + [mv], sf_me, opp_m)
@@ -351,8 +361,9 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
         return pool.at[pid, "name"] if pid in pool.index else pid
 
     def day_label(d):
-        i = week.index(d) if d in week else 0
-        return DOW[i % 7]
+        return W.label(d, anchor, week.index(d) if d in week else 0)["dow"]
+
+    nba_games = [sum(1 for g in sched.values() if d in g) // 2 for d in week]
 
     def pinfo(pid):
         r = pool.loc[pid]
@@ -407,6 +418,10 @@ def plan(league: dict, pool: pd.DataFrame, sched: dict, team_id: int, period: in
         "opponent": {"id": opp_id, "name": teams[opp_id]["name"]},
         "period": period, "is_current": is_current, "objective": objective,
         "week_days": [day_label(d) for d in week],
+        "week_dates": [W.label(d, anchor)["date"] for d in week],
+        "nba_games": nba_games,
+        "add_locked_today": bool(add_locked_today and today is not None),
+        "weeks_source": p.get("weeks_source"),
         "today_index": week.index(today) if today in week else None,
         "mode": mode, "adds_left": adds_left, "adds_used": used, "adds_limit": limit,
         "droppable": droppable,

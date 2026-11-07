@@ -195,4 +195,7 @@ def demo_league(players: list[dict]) -> dict:
         },
         "teams": teams, "schedule": schedule, "members": [],
     }
-    return {"league": league, "pro_schedule": pro}
+    # calendar labels: make demo "today" the Wednesday of the current real week
+    t = date.today()
+    anchor = (today, t - timedelta(days=t.weekday() - DAY_OFFSET))
+    return {"league": league, "pro_schedule": pro, "anchor": anchor}

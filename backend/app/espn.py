@@ -285,8 +285,12 @@ def parse_league(data: dict, year: int) -> dict:
                       "roster": roster})
 
     schedule = []
+    observed: dict[int, set] = {}
     for m in data.get("schedule", []) or []:
         home, away = m.get("home") or {}, m.get("away") or {}
+        for side in (home, away):
+            for k in (side.get("pointsByScoringPeriod") or {}):
+                observed.setdefault(m.get("matchupPeriodId"), set()).add(int(k))
         if not home.get("teamId") or not away.get("teamId"):
             continue
         def live(side):
@@ -313,7 +317,11 @@ def parse_league(data: dict, year: int) -> dict:
         "roster_size": sum(v for k, v in slot_counts.items() if k != IR_SLOT) or 13,
         "teams": teams,
         "schedule": schedule,
-        "matchup_periods": matchup_periods,
+        "matchup_periods": matchup_periods,          # replaced by weeks.build() in the store
+        "matchup_periods_raw": matchup_periods,
+        "observed_days": {k: sorted(v) for k, v in observed.items() if k is not None},
+        "first_day": status.get("firstScoringPeriod") or 1,
+        "last_day": status.get("finalScoringPeriod"),
         "current_period": cur_period,
         "slot_counts": start_slots,
         "adds_limit_period": acq.get("matchupAcquisitionLimit"),

@@ -168,6 +168,7 @@ async function init() {
 }
 
 function showTab(t) {
+  if (t === "stream" && S.leagueKey && !S.stream) setTimeout(() => runStream(true), 0);
   $$("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   $$(".tab").forEach((s) => s.classList.toggle("on", s.id === "tab-" + t));
   try { history.replaceState(null, "", "#" + t); } catch {}
@@ -508,9 +509,9 @@ function renderStream() {
   const objLabel = win ? "Chance to win the matchup" : `Expected categories won (of ${R.cats.length})`;
   const dropSet = new Set(R.droppable);
   const sv = (c, v) => c === "fg" || c === "ft" ? pct(v) : v.toFixed(c === "tov" || c === "stl" || c === "blk" || c === "fg3m" ? 1 : 0);
-  const dayHead = (i) => `<th class="${i === R.today_index ? "today" : ""}">${R.week_days[i]}${i === R.today_index ? " ·" : ""}</th>`;
+  const dayHead = (i) => `<th class="${i === R.today_index ? "today" : ""}" title="${R.nba_games[i]} NBA games">${R.week_days[i]}<br><span class="meta" style="font-weight:400">${R.week_dates[i] || ""}${i === R.today_index ? " · today" : ""}</span></th>`;
   const moves = R.moves.length ? R.moves.map((m) => `<div class="move">
-      <div class="d">${m.day}</div>
+      <div class="d">${m.day}<br><span class="meta" style="font-weight:400;letter-spacing:0">${R.week_dates[R.week_days.indexOf(m.day)] || ""}</span></div>
       <div><span class="drop">${esc(m.drop.name)}</span> → <b>${esc(m.add.name)}</b> <span class="meta">${esc(m.add.team)} · ${esc(m.add.pos)}</span><br>
         <span class="meta">Starts ${m.add_starts.length ? m.add_starts.join(", ") : "no games"} </span></div>
       <div class="g">+${m.gain.toFixed(win ? 1 : 2)}${win ? " pts" : ""}</div></div>`).join("")
@@ -521,6 +522,7 @@ function renderStream() {
       ${r.cells.map((c) => `<td>${c === "none" ? "" : `<span class="cell ${c}" title="${{ start: "Starts", bench: "Has a game but no open slot", past: "Already played", off: "Not on roster" }[c]}"></span>`}</td>`).join("")}
       <td>${r.starts}</td></tr>`).join("")}
     <tr><td class="l meta">Starters / slots</td>${G.per_day.map((d) => `<td class="meta">${d ? `${d.starts}/${d.slots}${d.benched ? ` <span class="down">+${d.benched}</span>` : ""}` : ""}</td>`).join("")}<td></td></tr>
+    <tr><td class="l meta">NBA games that day</td>${R.nba_games.map((n) => `<td class="meta" style="${n <= 5 ? "color:rgb(var(--good));font-weight:600" : ""}">${n}</td>`).join("")}<td></td></tr>
     </tbody></table>`;
   const addedIds = new Set(R.moves.map((m) => m.add.id));
   S.streamView = S.streamView || "after";
@@ -538,6 +540,7 @@ function renderStream() {
     <div class="s-cols">
       <div>
         <h3 style="margin-top:0">Plan</h3>
+        ${R.add_locked_today ? `<p class="note" style="margin-top:0">Today's games have started, so anyone added today plays from tomorrow.</p>` : ""}
         <div class="moves">${moves}</div>
         <h3>Droppable players <span class="hint">· defaults to your 3 lowest-valued; tap to change, then re-plan</span></h3>
         <div class="drops">${R.roster.map((p) => `<label class="${dropSet.has(p.id) ? "on" : ""}"><input type="checkbox" data-pid="${p.id}" ${dropSet.has(p.id) ? "checked" : ""}>${esc(p.name)} <span class="meta">${p.value.toFixed(2)}</span></label>`).join("")}</div>
