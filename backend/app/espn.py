@@ -40,6 +40,10 @@ PRO_TEAMS = {0: "FA", 1: "ATL", 2: "BOS", 3: "NOP", 4: "CHI", 5: "CLE", 6: "DAL"
 POS = {1: "PG", 2: "SG", 3: "SF", 4: "PF", 5: "C"}
 SLOT_POS = {0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C"}
 BENCH_SLOT, IR_SLOT = 12, 13
+# lineup slot ids (ESPN basketball POSITION_MAP)
+SLOT_NAMES = {0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C", 5: "G", 6: "F", 7: "SG/SF",
+              8: "G/F", 9: "PF/C", 10: "F/C", 11: "UT", 12: "BE", 13: "IR"}
+STARTING_SLOTS = set(range(0, 12))
 
 SPLITS = {  # key -> (label, source, split, year_offset)
     "season": ("This season", 0, 0, 0),
@@ -122,6 +126,8 @@ def _player_row(p: dict) -> dict:
         "injury": (p.get("injuryStatus") or "ACTIVE").replace("_", " ").title()
                   if p.get("injuryStatus") not in (None, "ACTIVE") else "",
         "owned": round((p.get("ownership") or {}).get("percentOwned", 0) or 0, 1),
+        "slots": tuple(sorted(int(s) for s in p.get("eligibleSlots", []) if int(s) in STARTING_SLOTS)),
+        "inj_status": (p.get("injuryStatus") or "ACTIVE").upper(),
     }
 
 
@@ -153,6 +159,7 @@ def players_to_frames(entries: list[dict], year: int) -> dict[str, pd.DataFrame]
         p = e.get("player", e)
         base = _player_row(p)
         base["fantasy_team"] = e.get("onTeamId", 0) or 0
+        base["status"] = (e.get("status") or ("ONTEAM" if base["fantasy_team"] else "FREEAGENT")).upper()
         for key, (_, src, sp, off) in SPLITS.items():
             s = _split_stats(p, f"{src}{sp}{year + off}")
             if s:
@@ -174,15 +181,56 @@ def fetch_pro_schedule(year: int) -> dict:
     return _get(f"{BASE}/seasons/{year}", params={"view": "proTeamSchedules_wl"})
 
 
-def parse_pro_schedule(data: dict) -> dict[str, set[int]]:
-    """NBA team abbrev -> set of scoring period ids (days) with a game."""
+def parse_pro_schedule(data: dict) -> dict[str, dict[int, int | None]]:
+    """NBA team abbrev -> {scoring period id (day): tip-off time in epoch ms (or None)}.
+    Membership tests (`day in sched[team]`) work as before."""
     out = {}
     for t in (data.get("settings") or {}).get("proTeams", []):
         abbr = PRO_TEAMS.get(t.get("id"), None)
         if not abbr or abbr == "FA":
             continue
-        out[abbr] = {int(k) for k, games in (t.get("proGamesByScoringPeriod") or {}).items()
-                     if games}
+        days = {}
+        for k, games in (t.get("proGamesByScoringPeriod") or {}).items():
+            if games:
+                days[int(k)] = (games[0] or {}).get("date")
+        out[abbr] = days
+    return out
+
+
+def fetch_week_box(league_id: str, year: int, period: int, day: int,
+                   espn_s2: str | None = None, swid: str | None = None) -> dict:
+    """Current matchup's box scores (players' stats for the matchup period so far)."""
+    url = f"{BASE}/seasons/{year}/segments/0/leagues/{league_id}"
+    flt = {"schedule": {"filterMatchupPeriodIds": {"value": [period]}}}
+    return _get(url, params=[("view", "mMatchupScore"), ("view", "mScoreboard"),
+                             ("scoringPeriodId", day)],
+                headers={"X-Fantasy-Filter": json.dumps(flt)},
+                cookies=_cookies(espn_s2, swid))
+
+
+def parse_week_box(data: dict, period: int) -> dict[int, dict]:
+    """team id -> summed FGM/FGA/FTM/FTA this matchup period, from
+    rosterForMatchupPeriod (best effort: empty if ESPN doesn't include it)."""
+    out: dict[int, dict] = {}
+    for m in data.get("schedule", []) or []:
+        if m.get("matchupPeriodId") != period:
+            continue
+        for side in ("home", "away"):
+            s = m.get(side) or {}
+            tid = s.get("teamId")
+            entries = ((s.get("rosterForMatchupPeriod") or {}).get("entries") or [])
+            if not tid or not entries:
+                continue
+            tot = {"fgm": 0.0, "fga": 0.0, "ftm": 0.0, "fta": 0.0}
+            for e in entries:
+                p = ((e.get("playerPoolEntry") or {}).get("player") or {})
+                for st in p.get("stats", []) or []:
+                    vals = st.get("stats") or {}
+                    if STAT["fga"] in vals or STAT["fta"] in vals:
+                        for k in tot:
+                            tot[k] += float(vals.get(STAT[k], 0) or 0)
+                        break
+            out[tid] = tot
     return out
 
 
@@ -202,6 +250,10 @@ def parse_league(data: dict, year: int) -> dict:
     slot_counts = {int(k): v for k, v in
                    ((settings.get("rosterSettings") or {}).get("lineupSlotCounts") or {}).items()}
     starters = sum(v for k, v in slot_counts.items() if k not in (BENCH_SLOT, IR_SLOT)) or 10
+    start_slots = {k: v for k, v in slot_counts.items() if k in STARTING_SLOTS and v} or {11: starters}
+    acq = settings.get("acquisitionSettings") or {}
+    status = data.get("status", {}) or {}
+    cur_period = status.get("currentMatchupPeriod") or 1
 
     matchup_periods = {int(k): [int(x) for x in v] for k, v in
                        ((settings.get("scheduleSettings") or {}).get("matchupPeriods") or {}).items()}
@@ -216,6 +268,8 @@ def parse_league(data: dict, year: int) -> dict:
             m = members[owner_ids[0]]
             owner = f"{m.get('firstName', '')} {m.get('lastName', '')}".strip() or m.get("displayName", "")
         rec = ((t.get("record") or {}).get("overall") or {})
+        tc = t.get("transactionCounter") or {}
+        adds_period = (tc.get("matchupAcquisitionTotals") or {}).get(str(cur_period))
         roster = []
         for e in ((t.get("roster") or {}).get("entries") or []):
             pe = e.get("playerPoolEntry") or {}
@@ -227,6 +281,7 @@ def parse_league(data: dict, year: int) -> dict:
                       "abbrev": t.get("abbrev", ""), "owner": owner,
                       "record": {"w": rec.get("wins", 0), "l": rec.get("losses", 0),
                                  "t": rec.get("ties", 0)},
+                      "adds_this_period": adds_period, "adds_season": tc.get("acquisitions"),
                       "roster": roster})
 
     schedule = []
@@ -238,12 +293,15 @@ def parse_league(data: dict, year: int) -> dict:
             sbs = ((side.get("cumulativeScore") or {}).get("scoreByStat") or {})
             return {SCORING_CAT[int(k)]: v.get("score") for k, v in sbs.items()
                     if int(k) in SCORING_CAT and v.get("score") is not None}
+        def live_raw(side):
+            sbs = ((side.get("cumulativeScore") or {}).get("scoreByStat") or {})
+            return {int(k): v.get("score") for k, v in sbs.items() if v.get("score") is not None}
         schedule.append({"period": m.get("matchupPeriodId"),
                          "home": home["teamId"], "away": away["teamId"],
                          "home_live": live(home), "away_live": live(away),
+                         "home_raw": live_raw(home), "away_raw": live_raw(away),
                          "winner": m.get("winner")})
 
-    status = data.get("status", {}) or {}
     return {
         "id": str(data.get("id")),
         "year": year,
@@ -256,7 +314,10 @@ def parse_league(data: dict, year: int) -> dict:
         "teams": teams,
         "schedule": schedule,
         "matchup_periods": matchup_periods,
-        "current_period": status.get("currentMatchupPeriod") or 1,
+        "current_period": cur_period,
+        "slot_counts": start_slots,
+        "adds_limit_period": acq.get("matchupAcquisitionLimit"),
+        "adds_limit_season": acq.get("acquisitionLimit"),
         "current_day": data.get("scoringPeriodId"),
         "roster_entries": roster_entries,
     }

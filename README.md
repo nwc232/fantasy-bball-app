@@ -7,6 +7,13 @@ Live 9-cat fantasy basketball rankings with punts, plus ESPN league import, H2H 
 - **Refresh**: the ↻ button re-pulls ESPN stats and your league rosters. The page also refreshes on its own every 10 minutes while it's open, and the server re-pulls a league once its data is over 10 minutes old.
 - **League**: import an ESPN league (public, or private with your cookies). Shows each team's projected weekly category totals, category ranks, and all-play win % against every other team.
 - **Matchups**: win probability for every matchup in a given week, plus odds per category. Games are counted from the real NBA schedule and capped at your daily starting slots.
+- **Streaming**: plans this week's add/drops against your actual opponent. It counts:
+  - what has already happened this week, plus every remaining game, skipping games that have tipped off
+  - ESPN's position slots day by day, so a player only helps on days he'd actually start
+  - injuries
+  - your league's weekly add limit
+
+  It works out chains (a Mon–Tue streamer, then a Wed–Sun one in the same spot) and ranks every free agent by how much he'd raise your odds this week. It follows your league's scoring: win chance for most-categories leagues, expected categories for each-category leagues. It suggests drops from your 3 lowest-valued players by default; tap players to change who's droppable. Your opponent is projected from their current roster.
 - **Trade analyzer**: pick players from any two teams, or from free agents for add/drops, and mark drops. For both sides it shows how each category's weekly total, win %, and rank change, along with all-play win % and power rank, and how the trade moves every team in the league.
 
 ## Run locally

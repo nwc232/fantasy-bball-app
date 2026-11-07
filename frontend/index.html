@@ -19,6 +19,7 @@
     <button data-tab="rankings" class="on">Rankings</button>
     <button data-tab="league">League</button>
     <button data-tab="matchups">Matchups</button>
+    <button data-tab="stream">Streaming</button>
     <button data-tab="trade">Trade analyzer</button>
     <button data-tab="method">Method</button>
   </nav>
@@ -125,6 +126,26 @@
         <span class="hint" id="periodNote"></span>
       </div>
       <div id="matchups" class="matchups"></div>
+    </div>
+  </section>
+
+  <!-- STREAMING -->
+  <section id="tab-stream" class="tab">
+    <div class="needs-league">Import a league (or the demo) on the League tab first.</div>
+    <div class="league-only hidden">
+      <div class="filters">
+        <label class="inline">Week <select id="sWeek"></select></label>
+        <label class="inline">Plan from
+          <select id="sMode">
+            <option value="auto">Auto (skip games that have tipped off)</option>
+            <option value="today">Today (count all of today's games)</option>
+            <option value="tomorrow">Tomorrow</option>
+          </select></label>
+        <label class="inline">Adds left <input id="sAdds" type="number" min="0" max="14" style="width:4em"></label>
+        <button id="sRun" class="primary">Plan my week</button>
+        <span id="sMsg" class="msg"></span>
+      </div>
+      <div id="sOut"></div>
     </div>
   </section>
 

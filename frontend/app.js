@@ -142,9 +142,13 @@ async function init() {
   $("#myTeam").addEventListener("change", () => {
     S.myTeam = +$("#myTeam").value; store.set("myTeam", S.myTeam); S.selTeam = S.myTeam;
     renderLeague(); renderMatchups(); setupTrade(true);
+    S.stream = null; $("#sAdds").value = "";
+    $("#sOut").innerHTML = `<p class="meta">Press <b>Plan my week</b> to find the best adds for your current matchup.</p>`;
   });
   $("#period").addEventListener("change", () => loadLeague());
   $("#tRun").addEventListener("click", runTrade);
+  $("#sRun").addEventListener("click", () => runStream(false));
+  ["#sWeek", "#sMode"].forEach((id) => $(id).addEventListener("change", () => runStream(true)));
   $("#tClear").addEventListener("click", () => { setupTrade(true); $("#tResult").innerHTML = ""; });
   $("#tA").addEventListener("change", () => { S.trade.a = +$("#tA").value; resetSel(); renderTradeLists(); });
   $("#tB").addEventListener("change", () => { S.trade.b = +$("#tB").value; resetSel(); renderTradeLists(); });
@@ -157,7 +161,7 @@ async function init() {
   }
   renderMethod();
   const hash = location.hash.replace("#", "");
-  if (["rankings", "league", "matchups", "trade", "method"].includes(hash)) showTab(hash);
+  if (["rankings", "league", "matchups", "stream", "trade", "method"].includes(hash)) showTab(hash);
   await loadRankings();
   if (saved && saved.demo) loadLeagueKey(null, true);
   else if (saved && saved.league_id) importLeague(true);
@@ -404,6 +408,7 @@ async function loadLeague(first) {
   renderLeague();
   renderMatchups();
   setupTrade(first || S.trade.a == null);
+  if (first) { S.stream = null; $("#sOut").innerHTML = `<p class="meta">Press <b>Plan my week</b> to find the best adds for your current matchup.</p>`; }
 }
 
 function renderLeague() {
@@ -472,6 +477,110 @@ function renderMatchups() {
   }).join("");
 }
 const fmtLive = (c, v) => v == null ? "–" : (c === "fg" || c === "ft" ? pct(v) : Math.round(v));
+
+/* ---------- streaming ---------- */
+function dropKey() { return `drops:${S.leagueKey}:${S.myTeam}`; }
+async function runStream(keepAdds) {
+  if (!S.leagueKey) return;
+  $("#sMsg").textContent = "Planning…";
+  const body = { ...params(), team_id: S.myTeam, mode: $("#sMode").value };
+  if ($("#sWeek").value) body.period = +$("#sWeek").value;
+  const saved = store.get(dropKey(), null);
+  if (saved) body.droppable = saved;
+  if (keepAdds !== true && $("#sAdds").value !== "") body.adds_left = +$("#sAdds").value;
+  try {
+    S.stream = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/stream`, { method: "POST", body: JSON.stringify(body) });
+    $("#sMsg").textContent = "";
+    renderStream();
+  } catch (e) { $("#sMsg").textContent = e.message; }
+}
+
+function renderStream() {
+  const R = S.stream;
+  if (!R) return;
+  const weekSel = $("#sWeek");
+  const curVal = weekSel.value;
+  weekSel.innerHTML = R.periods.map((p, i) => `<option value="${p}">Week ${p}${i === 0 ? " (this week)" : ""}</option>`).join("");
+  weekSel.value = curVal && R.periods.includes(+curVal) ? curVal : R.period;
+  $("#sAdds").value = R.adds_left;
+  const win = R.objective === "win";
+  const fmtObj = (x) => win ? `${x.win.toFixed(0)}%` : `${x.exp_cats.toFixed(2)}`;
+  const objLabel = win ? "Chance to win the matchup" : `Expected categories won (of ${R.cats.length})`;
+  const dropSet = new Set(R.droppable);
+  const sv = (c, v) => c === "fg" || c === "ft" ? pct(v) : v.toFixed(c === "tov" || c === "stl" || c === "blk" || c === "fg3m" ? 1 : 0);
+  const dayHead = (i) => `<th class="${i === R.today_index ? "today" : ""}">${R.week_days[i]}${i === R.today_index ? " ·" : ""}</th>`;
+  const moves = R.moves.length ? R.moves.map((m) => `<div class="move">
+      <div class="d">${m.day}</div>
+      <div><span class="drop">${esc(m.drop.name)}</span> → <b>${esc(m.add.name)}</b> <span class="meta">${esc(m.add.team)} · ${esc(m.add.pos)}</span><br>
+        <span class="meta">Starts ${m.add_starts.length ? m.add_starts.join(", ") : "no games"} </span></div>
+      <div class="g">+${m.gain.toFixed(win ? 1 : 2)}${win ? " pts" : ""}</div></div>`).join("")
+    : `<div class="card meta">No pickup improves your odds enough to be worth an add${R.adds_left === 0 ? " (you have no adds left)" : ""}. Try marking more players as droppable.</div>`;
+
+  const grid = (G, addedIds) => `<table class="sgrid"><thead><tr><th class="l">Player</th>${R.week_days.map((_, i) => dayHead(i)).join("")}<th>Starts</th></tr></thead><tbody>
+    ${G.rows.map((r) => `<tr class="${addedIds.has(r.id) ? "added" : ""}"><td class="l"><span class="name">${esc(r.name)}</span>${r.injury ? `<span class="inj">${esc(r.injury)}</span>` : ""} <span class="meta">${esc(r.team)} · ${esc(r.pos)}</span></td>
+      ${r.cells.map((c) => `<td>${c === "none" ? "" : `<span class="cell ${c}" title="${{ start: "Starts", bench: "Has a game but no open slot", past: "Already played", off: "Not on roster" }[c]}"></span>`}</td>`).join("")}
+      <td>${r.starts}</td></tr>`).join("")}
+    <tr><td class="l meta">Starters / slots</td>${G.per_day.map((d) => `<td class="meta">${d ? `${d.starts}/${d.slots}${d.benched ? ` <span class="down">+${d.benched}</span>` : ""}` : ""}</td>`).join("")}<td></td></tr>
+    </tbody></table>`;
+  const addedIds = new Set(R.moves.map((m) => m.add.id));
+  S.streamView = S.streamView || "after";
+
+  $("#sOut").innerHTML = `
+    <div class="s-head">
+      <div><h2>${esc(R.team.name)} vs ${esc(R.opponent.name)}</h2>
+        <div class="meta">Week ${R.period}${R.is_current ? ` · today is ${R.week_days[R.today_index] || "–"}` : " · upcoming"} · ${R.adds_used ? `${R.adds_used} add${R.adds_used > 1 ? "s" : ""} used, ` : ""}${R.adds_limit != null && R.adds_limit >= 0 ? `limit ${R.adds_limit}` : "no add limit"} · stats: ${esc(S.meta.splits[R.split] || R.split)}</div></div>
+      <div class="verdict" style="margin:0">
+        <div class="kpi"><div class="k">${objLabel}</div><div class="v">${fmtObj(R.before)} → <span class="${(win ? R.after.win - R.before.win : R.after.exp_cats - R.before.exp_cats) > 0 ? "up" : ""}">${fmtObj(R.after)}</span></div>
+          <div class="meta">${win ? `${R.before.exp_cats.toFixed(2)} → ${R.after.exp_cats.toFixed(2)} expected cats` : `win chance ${R.before.win.toFixed(0)}% → ${R.after.win.toFixed(0)}%`}</div></div>
+        <div class="kpi"><div class="k">Starts left</div><div class="v">${R.before.starts} → ${R.after.starts}</div><div class="meta">${R.after.benched ? `${R.after.benched} games lost to full lineups` : "no games lost to full lineups"}</div></div>
+      </div>
+    </div>
+    <div class="s-cols">
+      <div>
+        <h3 style="margin-top:0">Plan</h3>
+        <div class="moves">${moves}</div>
+        <h3>Droppable players <span class="hint">· defaults to your 3 lowest-valued; tap to change, then re-plan</span></h3>
+        <div class="drops">${R.roster.map((p) => `<label class="${dropSet.has(p.id) ? "on" : ""}"><input type="checkbox" data-pid="${p.id}" ${dropSet.has(p.id) ? "checked" : ""}>${esc(p.name)} <span class="meta">${p.value.toFixed(2)}</span></label>`).join("")}</div>
+        <button class="ghost small" id="sResetDrops" style="margin-top:6px">Reset to 3 lowest</button>
+      </div>
+      <div>
+        <h3 style="margin-top:0">Categories</h3>
+        <table class="grid"><thead><tr><th class="l">Cat</th><th>So far</th><th>You (proj)</th><th>Opp (proj)</th><th>Win % now → plan</th></tr></thead><tbody>
+        ${R.cats.map((c) => {
+          const b = R.before.probs[c], a = R.after.probs[c];
+          return `<tr class="${S.punts.has(c) ? "punted" : ""}"><td class="l"><b>${LABEL[c]}</b></td>
+            <td class="meta">${R.is_current ? `${sv(c, R.so_far.me[c])}–${sv(c, R.so_far.opp[c])}` : "–"}</td>
+            <td>${sv(c, R.before.proj[c])}${Math.abs(R.after.proj[c] - R.before.proj[c]) > 1e-6 ? ` → <b>${sv(c, R.after.proj[c])}</b>` : ""}</td>
+            <td>${sv(c, R.opp_proj[c])}</td>
+            <td style="${heat((a - 50) / 20)}">${b.toFixed(0)}% → <b>${a.toFixed(0)}%</b></td></tr>`;
+        }).join("")}</tbody></table>
+        <p class="note">Your opponent is projected from their current roster; if they stream too, your real odds are a bit lower.</p>
+      </div>
+    </div>
+    <h3>Schedule <span class="seg" id="sView">
+      <button data-v="after" class="${S.streamView === "after" ? "on" : ""}">With plan</button>
+      <button data-v="before" class="${S.streamView === "before" ? "on" : ""}">Current roster</button>
+      <button data-v="opp" class="${S.streamView === "opp" ? "on" : ""}">Opponent</button></span></h3>
+    <div class="legend"><span><i class="cell start"></i> starts</span><span><i class="cell bench"></i> game, but no open slot</span><span><i class="cell off"></i> not on roster</span><span><i class="cell past"></i> already played</span></div>
+    <div class="table-wrap" id="sGrid">${grid(S.streamView === "before" ? R.grid_before : S.streamView === "opp" ? R.grid_opp : R.grid_after, S.streamView === "after" ? addedIds : new Set())}</div>
+    <h3>Best available streamers <span class="hint">· each one's best single add vs your current roster</span></h3>
+    <div class="table-wrap"><table class="grid"><thead><tr><th class="l">Player</th><th class="l">Games left</th><th>Starts</th><th class="l">Add on</th><th class="l">Drop</th><th>Gain</th><th>${win ? "Win %" : "Exp cats"}</th><th>Value</th></tr></thead><tbody>
+      ${R.board.map((b) => `<tr><td class="l clickable" data-pid="${esc(b.id)}"><span class="name">${esc(b.name)}</span>${b.injury ? `<span class="inj">${esc(b.injury)}</span>` : ""} <span class="meta">${esc(b.team)} · ${esc(b.pos)}</span></td>
+        <td class="l">${b.days.map((d) => `<span class="daychip">${d}</span>`).join("")}</td><td>${b.starts}</td>
+        <td class="l meta">${b.add_day}</td><td class="l meta">${esc(b.drop)}</td>
+        <td><b class="${b.gain > 0 ? "up" : "down"}">${b.gain > 0 ? "+" : ""}${b.gain.toFixed(win ? 1 : 2)}</b></td>
+        <td>${win ? b.win.toFixed(0) + "%" : b.exp_cats.toFixed(2)}</td><td class="meta">${b.value.toFixed(2)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+
+  $$("#sView button").forEach((b) => b.addEventListener("click", () => { S.streamView = b.dataset.v; renderStream(); }));
+  $$(".drops input").forEach((cb) => cb.addEventListener("change", () => {
+    const ids = $$(".drops input").filter((x) => x.checked).map((x) => x.dataset.pid);
+    store.set(dropKey(), ids);
+    runStream(false);
+  }));
+  $("#sResetDrops").addEventListener("click", () => { store.del(dropKey()); runStream(true); });
+  bindExplain("#sOut");
+}
 
 /* ---------- trade ---------- */
 function resetSel() { ["aGive", "bGive", "aDrop", "bDrop"].forEach((k) => S.trade[k].clear()); }
@@ -605,6 +714,15 @@ function renderMethod() {
     <li><b>Minus 1 hurt in this setup, with a big caveat:</b> the simulated drafter just takes the highest-ranked player and never builds around a punt, which is exactly what Minus 1 is for. These results show it's a weak <i>straight ranking</i>, not that it's a bad team-building tool.</li>
   </ul>
   <p>Other limits: one season, opponents all draft the same way, no waiver streaming, every game counts. Treat the results as directional.</p>
+  <h2>Streaming planner</h2>
+  <p>Week total = this week's actual stats so far (from ESPN) + projected remaining games. A remaining game counts only if:</p>
+  <ul>
+    <li>the player is on your roster that day</li>
+    <li>the game hasn't tipped off</li>
+    <li>he gets a starting slot. Lineups are filled day by day under your league's position slots, maximizing starts and then player value.</li>
+  </ul>
+  <p>Injuries: OUT counts as 0 games, and day-to-day or questionable as 0.7 of a game.</p>
+  <p>The planner tries every (day, drop, add) combination, with the add day set to one of the free agent's game days, and keeps the best one. It repeats until your adds run out or no move gains at least +0.5 points of win chance (+0.03 expected categories in each-category leagues). Players it streams in can be dropped again later in the week, which produces the "two streamers in one spot" plans. Waiver players are left out because they can't be added today. Your opponent is projected from their current roster, so if they stream too, your real odds are a little lower.</p>
   <h2>Matchup model</h2>
   <p>Weekly projection = per-game stats × games that week. Games come from the NBA schedule, capped at your daily starting slots with the best players starting. Week-to-week randomness uses dispersion estimated from 2025-26 game logs; FG% and FT% are binomial on the week's attempts. Win probabilities come from 4,000 simulated weeks. Matchup and trade odds use the stats directly, so they don't depend on which ranking system you pick.</p>`;
 }

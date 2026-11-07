@@ -71,6 +71,12 @@ class Store:
             pool_raw = espn.fetch_player_pool(year, league_id, espn_s2, swid)
         except espn.ESPNError:
             pool_raw = []
+        try:   # FGA/FTA so far this week, for FG%/FT% (best effort)
+            box = espn.fetch_week_box(league_id, year, parsed["current_period"],
+                                      parsed["current_day"] or 1, espn_s2, swid)
+            parsed["week_box"] = espn.parse_week_box(box, parsed["current_period"])
+        except espn.ESPNError:
+            parsed["week_box"] = {}
         frames = self._league_frames(parsed, pool_raw, year)
         key = f"{league_id}-{year}"
         self.leagues[key] = {"parsed": parsed, "frames": frames, "sched": self.schedule(year),
@@ -93,6 +99,10 @@ class Store:
                 continue
             f = pd.concat(parts, ignore_index=True)
             f["fantasy_team"] = f["id"].map(owner).fillna(0).astype(int)
+            if "status" not in f:
+                f["status"] = "FREEAGENT"
+            f.loc[f["fantasy_team"] != 0, "status"] = "ONTEAM"
+            f.loc[(f["fantasy_team"] == 0) & (f["status"] == "ONTEAM"), "status"] = "FREEAGENT"
             out[k] = f
         return _clean(out)
 
@@ -100,6 +110,7 @@ class Store:
         players = demo.demo_players()
         d = demo.demo_league(players)
         parsed = espn.parse_league(d["league"], demo.YEAR)
+        parsed["week_box"] = {}
         frames = self._league_frames(parsed, players, demo.YEAR)
         self.leagues["demo"] = {"parsed": parsed, "frames": frames,
                                 "sched": espn.parse_pro_schedule(d["pro_schedule"]),

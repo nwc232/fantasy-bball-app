@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from . import engine as E
 from . import espn
 from . import league as L
+from . import stream as ST
 from .store import STORE, current_year
 
 app = FastAPI(title="Fantasy Category Rankings")
@@ -297,6 +298,41 @@ def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str =
                        "mpg": round(float(r["mpg"]), 1)},
             "current": detail(cur), "target": detail(tgt), "target_key": target,
             "singles": singles, "path": path, "presets": presets}
+
+
+class StreamBody(BaseModel):
+    team_id: int
+    period: int = 0
+    droppable: list[str] | None = None
+    adds_left: int | None = None
+    mode: str = "auto"
+    split: str = "season"
+    system: str = E.DEFAULT_SYSTEM
+    punt: str = ""
+    m1: int | None = None
+    ref: str | None = None
+    center: str | None = None
+    transform: int | None = None
+    weights: str | None = None
+    tov: float | None = None
+
+
+@app.post("/api/league/{key}/stream")
+def stream(key: str, body: StreamBody):
+    sy = _system(body.system, body.ref, body.center, body.transform, body.weights, body.tov, body.m1)
+    lg, p, used, pool, punts, _ = _league_ctx(key, body.split, sy, body.punt)
+    if body.mode not in ("auto", "today", "tomorrow"):
+        raise HTTPException(400, "mode must be auto, today or tomorrow")
+    if not lg["sched"]:
+        raise HTTPException(503, "The NBA schedule isn't available, so games can't be counted.")
+    try:
+        res = ST.plan(p, pool, lg["sched"], body.team_id, body.period or p["current_period"],
+                      droppable=body.droppable, adds_left=body.adds_left, mode=body.mode)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    res["split"] = used
+    res["periods"] = [x for x in sorted(p["matchup_periods"]) if x >= p["current_period"]][:3]
+    return res
 
 
 class TradeBody(BaseModel):

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import date, timedelta
 
 import numpy as np
@@ -18,8 +19,22 @@ from .espn import PRO_TEAMS, STAT
 HERE = os.path.join(os.path.dirname(__file__), "data")
 YEAR = 2026
 ABBR_TO_ID = {v: k for k, v in PRO_TEAMS.items()}
-POS_SLOTS = {"G": [0, 1], "F": [2, 3], "C": [4], "G-F": [1, 2], "F-G": [1, 2],
-             "F-C": [3, 4], "C-F": [3, 4]}
+BASE_POS = {"G": {"PG", "SG"}, "F": {"SF", "PF"}, "C": {"C"}, "G-F": {"SG", "SF"},
+            "F-G": {"SG", "SF"}, "F-C": {"PF", "C"}, "C-F": {"PF", "C"}}
+
+
+def slots_for(position: str) -> list[int]:
+    """ESPN eligibleSlots from a base position: PG0 SG1 SF2 PF3 C4 G5 F6 SG/SF7 G/F8
+    PF/C9 F/C10 UT11 BE12 IR13."""
+    pos = BASE_POS.get(position, {"SF"})
+    s = {i for i, p in enumerate(["PG", "SG", "SF", "PF", "C"]) if p in pos}
+    if pos & {"PG", "SG"}: s.add(5)
+    if pos & {"SF", "PF"}: s.add(6)
+    if pos & {"SG", "SF"}: s.add(7)
+    if pos & {"PG", "SG", "SF", "PF"}: s.add(8)
+    if pos & {"PF", "C"}: s.add(9)
+    if pos & {"SF", "PF", "C"}: s.add(10)
+    return sorted(s) + [11, 12, 13]
 
 
 def _season_frame() -> pd.DataFrame:
@@ -42,16 +57,21 @@ def _season_frame() -> pd.DataFrame:
 
 def demo_players() -> list[dict]:
     df = _season_frame()
+    rng = np.random.default_rng(7)
     out = []
     for r in df.itertuples():
         tot = {STAT[k]: float(getattr(r, k)) for k in
                ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov", "fgm", "fga", "ftm", "fta", "min"]}
         tot[STAT["gp"]] = float(r.g)
         avg = {k: v / r.g for k, v in tot.items() if k != STAT["gp"]}
-        out.append({"id": int(r.id), "onTeamId": 0, "player": {
+        u = rng.random()
+        inj = "OUT" if u < 0.03 else "DAY_TO_DAY" if u < 0.06 else "ACTIVE"
+        out.append({"id": int(r.id), "onTeamId": 0,
+                    "status": "WAIVERS" if rng.random() < 0.08 else "FREEAGENT",
+                    "player": {
             "id": int(r.id), "fullName": r.name, "proTeamId": ABBR_TO_ID.get(r.team, 0),
-            "eligibleSlots": POS_SLOTS.get(r.position, []) + [11, 12, 13],
-            "injuryStatus": "ACTIVE",
+            "eligibleSlots": slots_for(r.position),
+            "injuryStatus": inj,
             "ownership": {"percentOwned": 0},
             "stats": [{"id": f"00{YEAR}", "seasonId": YEAR, "statSourceId": 0,
                        "statSplitTypeId": 0, "stats": tot, "averageStats": avg}],
@@ -59,14 +79,16 @@ def demo_players() -> list[dict]:
     return out
 
 
-def demo_schedule() -> tuple[dict, dict[int, list[int]], int]:
-    """ESPN proTeamSchedules shape, matchup periods (Mon-Sun weeks), current period."""
+CURRENT_PERIOD = 20
+DAY_OFFSET = 2   # demo "today" = the 3rd day of the current matchup week
+
+
+def demo_schedule() -> tuple[dict, dict[int, list[int]], int, int]:
+    """ESPN proTeamSchedules shape (with tip-off times), matchup periods
+    (Mon-Sun weeks), current period, current day. Times are set relative to now
+    so that today's demo games haven't tipped off yet."""
     s = json.load(open(os.path.join(HERE, "schedule_2025_26.json")))
     start = date.fromisoformat(s["start"])
-    pro = {"settings": {"proTeams": [
-        {"id": ABBR_TO_ID[t], "abbrev": t,
-         "proGamesByScoringPeriod": {str(d): [{"id": d}] for d in days}}
-        for t, days in s["days"].items()]}}
     last = max(max(v) for v in s["days"].values())
     first_monday = start - timedelta(days=start.weekday())
     periods: dict[int, list[int]] = {}
@@ -74,7 +96,14 @@ def demo_schedule() -> tuple[dict, dict[int, list[int]], int]:
         dt = start + timedelta(days=day - 1)
         wk = (dt - first_monday).days // 7 + 1
         periods.setdefault(wk, []).append(day)
-    return pro, periods, 20
+    today = periods[CURRENT_PERIOD][DAY_OFFSET]
+    now_ms = int(time.time() * 1000)
+    tip = lambda d: now_ms + (d - today) * 86_400_000 + 2 * 3_600_000
+    pro = {"settings": {"proTeams": [
+        {"id": ABBR_TO_ID[t], "abbrev": t,
+         "proGamesByScoringPeriod": {str(d): [{"id": d, "date": tip(d)}] for d in days}}
+        for t, days in s["days"].items()]}}
+    return pro, periods, CURRENT_PERIOD, today
 
 
 def demo_league(players: list[dict]) -> dict:
@@ -86,7 +115,7 @@ def demo_league(players: list[dict]) -> dict:
         per[c] = per[c] / per["g"]
     per["mpg"] = per["min"] / per["g"]
     val = E.score(per, "z")["value"]
-    eligible = per.index[per["g"] >= 25]
+    eligible = per.index[per["g"] >= 10]
     rank = val.rank(ascending=False)
     teams_n, rounds = 12, 13
     rosters = [[] for _ in range(teams_n)]
@@ -101,7 +130,9 @@ def demo_league(players: list[dict]) -> dict:
             avail.remove(pick)
 
     by_id = {str(p["id"]): p for p in players}
-    pro, periods, current = demo_schedule()
+    pro, periods, current, today = demo_schedule()
+    sched_days = {t["abbrev"]: {int(k) for k in t["proGamesByScoringPeriod"]}
+                  for t in pro["settings"]["proTeams"]}
     names = ["Demo Ballers", "Pick and Pop", "Punt City", "Box Score Bandits", "Stat Stuffers",
              "Glass Cleaners", "Swat Team", "Splash Bros Inc", "Triple Doubles", "Free Throw Fails",
              "Bench Mob", "Waiver Wire Warriors"]
@@ -114,9 +145,28 @@ def demo_league(players: list[dict]) -> dict:
             entries.append({"playerId": int(pid), "lineupSlotId": 11 if j < 10 else 12,
                             "playerPoolEntry": {"id": int(pid), "player": p["player"]}})
         teams.append({"id": t + 1, "name": names[t], "abbrev": f"T{t+1}", "owners": [],
+                      "transactionCounter": {"acquisitions": 9,
+                                             "matchupAcquisitionTotals": {str(current): 1}},
                       "record": {"overall": {"wins": int(rng.integers(60, 120)),
                                              "losses": int(rng.integers(60, 120)), "ties": 0}},
                       "roster": {"entries": entries}})
+    # this week so far: each rostered player's per-game line x his games before today
+    past = [d for d in periods[current] if d < today]
+
+    def so_far(t: int) -> dict:
+        tot = {k: 0.0 for k in ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov",
+                                "fgm", "fga", "ftm", "fta"]}
+        for idx in rosters[t]:
+            g = sum(1 for d in past if d in sched_days.get(per.loc[idx, "team"], ()))
+            for k in tot:
+                tot[k] += per.loc[idx, k] * g
+        sid = {"pts": 0, "blk": 1, "stl": 2, "ast": 3, "reb": 6, "tov": 11, "fgm": 13,
+               "fga": 14, "ftm": 15, "fta": 16, "fg3m": 17}
+        out = {str(sid[k]): {"score": float(round(v, 3))} for k, v in tot.items()}
+        out["19"] = {"score": float(tot["fgm"] / tot["fga"]) if tot["fga"] else 0.0}
+        out["20"] = {"score": float(tot["ftm"] / tot["fta"]) if tot["fta"] else 0.0}
+        return {"scoreByStat": out}
+
     # round-robin schedule
     ids = list(range(1, teams_n + 1))
     schedule = []
@@ -124,10 +174,14 @@ def demo_league(players: list[dict]) -> dict:
         k = (period - 1) % (teams_n - 1)
         rot = [ids[0]] + ids[1:][k:] + ids[1:][:k]
         for i in range(teams_n // 2):
-            schedule.append({"matchupPeriodId": period, "home": {"teamId": rot[i]},
-                             "away": {"teamId": rot[-1 - i]}})
+            h, a = rot[i], rot[-1 - i]
+            m = {"matchupPeriodId": period, "home": {"teamId": h}, "away": {"teamId": a}}
+            if period == current:
+                m["home"]["cumulativeScore"] = so_far(h - 1)
+                m["away"]["cumulativeScore"] = so_far(a - 1)
+            schedule.append(m)
     league = {
-        "id": "demo", "scoringPeriodId": periods[current][0],
+        "id": "demo", "scoringPeriodId": today,
         "status": {"currentMatchupPeriod": current},
         "settings": {
             "name": "Demo League (2025-26 stats)",
@@ -136,6 +190,8 @@ def demo_league(players: list[dict]) -> dict:
             "rosterSettings": {"lineupSlotCounts": {"0": 1, "1": 1, "2": 1, "3": 1, "4": 1,
                                                     "5": 1, "6": 1, "11": 3, "12": 3, "13": 1}},
             "scheduleSettings": {"matchupPeriods": {str(k): v for k, v in periods.items()}},
+            "acquisitionSettings": {"matchupAcquisitionLimit": 4, "acquisitionLimit": -1,
+                                    "isUsingAcquisitionBudget": False},
         },
         "teams": teams, "schedule": schedule, "members": [],
     }
