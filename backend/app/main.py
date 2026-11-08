@@ -496,6 +496,16 @@ def trade(key: str, body: TradeBody):
 if os.path.isdir(FRONTEND):
     app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
+    def _asset_version() -> str:
+        """Changes whenever app.js / style.css change, so browsers fetch the new files."""
+        m = max(os.path.getmtime(os.path.join(FRONTEND, f)) for f in ("app.js", "style.css"))
+        return str(int(m))
+
     @app.get("/")
     def index():
-        return FileResponse(os.path.join(FRONTEND, "index.html"))
+        from fastapi.responses import HTMLResponse
+        html = open(os.path.join(FRONTEND, "index.html"), encoding="utf-8").read()
+        v = _asset_version()
+        html = html.replace("/static/app.js", f"/static/app.js?v={v}") \
+                   .replace("/static/style.css", f"/static/style.css?v={v}")
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
