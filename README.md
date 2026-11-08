@@ -3,6 +3,7 @@
 Live 9-cat fantasy basketball rankings with punts, plus ESPN league import, H2H matchup odds, power rankings and a trade analyzer.
 
 - **Rankings**: preset systems are DURANT H2H (the default), Category Lab, standard Z, G-score and DURANT. **Model settings** exposes every switch: what the scale is measured against (rostered / rostered + waivers / whole NBA), the zero point (pool average / waiver level), the transform, category weights, turnover weight, and Minus 1. Change any of them and you get a Custom system. Stats can be this season, last 7/15/30 days, ESPN projections or last season. The punt chips drop categories, and "vs Z" shows each player's movement against the standard rank.
+- **Fit for my team**: with a league loaded, switch Rankings to "Fit for my team". For anyone not on your team, it shows how much he'd change your weekly odds against your league if he took the spot of the player listed. For your own players, it shows how much better they are than the best free agent who could replace them; negative means that free agent fits better. It's scored the way your league scores, so a punt build is handled automatically. Filter to "Free agents" for the best pickups for your team.
 - **Why this rank?**: click any player's name. It shows his rank under every system, which setting moves him most between your system and another (e.g. Category Lab vs DURANT H2H), and his category values side by side.
 - **Refresh**: the ↻ button re-pulls ESPN stats and your league rosters. The page also refreshes on its own every 10 minutes while it's open, and the server re-pulls a league once its data is over 10 minutes old.
 - **League**: import an ESPN league (public, or private with your cookies). Shows each team's projected weekly category totals, category ranks, and all-play win % against every other team.
@@ -27,7 +28,7 @@ Click **Try the demo league** on the League tab to see every feature with 2025-2
 
 ## Deploy (free, on Render)
 1. Sign in at render.com with GitHub.
-2. Click **New → Blueprint** and pick this repo. Render reads `render.yaml` and asks for **APP_PASSWORD**. Set one: it's the password the site asks for, and any username works.
+2. Click **New → Blueprint** and pick this repo. Render reads `render.yaml` and asks for **APP_PASSWORD**. Set one: the site shows a login page, and you stay logged in for 30 days on each device. Changing the password logs everyone out.
 3. Click **Apply**. The first build takes a few minutes, and then you get a URL like `https://category-lab.onrender.com`.
 4. Every push to `main` redeploys automatically.
 

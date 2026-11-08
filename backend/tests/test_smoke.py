@@ -113,14 +113,25 @@ def test_empty_stat_windows_are_not_created():
     assert j["power"][0]["cats"]["pts"]["weekly"] > 0
 
 
-def test_password_gate(monkeypatch):
-    import base64
+def test_login_session(monkeypatch):
     from app import main as M
     monkeypatch.setattr(M, "APP_PASSWORD", "hoops")
-    assert c.get("/api/health").status_code == 200                  # health check stays open
-    r = c.get("/api/meta")
-    assert r.status_code == 401 and "Basic" in r.headers["www-authenticate"]
-    bad = base64.b64encode(b"x:nope").decode()
-    assert c.get("/api/meta", headers={"Authorization": f"Basic {bad}"}).status_code == 401
-    ok = base64.b64encode(b"anyone:hoops").decode()
-    assert c.get("/api/meta", headers={"Authorization": f"Basic {ok}"}).status_code == 200
+    fresh = TestClient(app)
+    assert fresh.get("/api/health").status_code == 200              # health check stays open
+    assert fresh.get("/login").status_code == 200
+    assert fresh.get("/static/style.css").status_code == 200
+    assert fresh.get("/api/meta").status_code == 401                 # API needs a session
+    r = fresh.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert fresh.post("/api/login", json={"password": "nope"}).status_code == 401
+    r = fresh.post("/api/login", json={"password": "hoops"})
+    assert r.status_code == 200 and "cl_session" in r.cookies
+    assert "httponly" in r.headers["set-cookie"].lower()
+    assert fresh.get("/api/meta").status_code == 200                 # cookie now sent
+    assert fresh.get("/api/meta").json()["auth"] is True
+    fresh.cookies.set("cl_session", "9999999999.forged")
+    assert fresh.get("/api/meta").status_code == 401                 # forged token rejected
+    monkeypatch.setattr(M, "APP_PASSWORD", "changed")                # new password logs everyone out
+    good = TestClient(app)
+    good.cookies.set("cl_session", r.cookies["cl_session"])
+    assert good.get("/api/meta").status_code == 401

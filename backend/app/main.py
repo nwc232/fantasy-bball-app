@@ -18,32 +18,87 @@ from . import engine as E
 from . import espn
 from . import league as L
 from . import stream as ST
+from . import fit as FIT
 from .store import STORE, current_year
 
 app = FastAPI(title="Fantasy Category Rankings")
 log = logging.getLogger("categorylab")
 
-# Optional site password (HTTP basic auth). Set APP_PASSWORD on the host to turn
-# it on; any username works. Leave it unset when running locally.
+# Optional site password. Set APP_PASSWORD on the host to turn it on; leave it
+# unset when running locally. Logging in sets a signed, HttpOnly cookie that lasts
+# 30 days. The signing key is derived from the password, so changing the password
+# logs everyone out.
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+SESSION_COOKIE = "cl_session"
+SESSION_DAYS = 30
+PUBLIC_PATHS = {"/login", "/api/login", "/api/health", "/api/logout"}
+
+
+def _session_key() -> bytes:
+    import hashlib
+    return hashlib.sha256(("category-lab:" + APP_PASSWORD).encode()).digest()
+
+
+def _make_session() -> str:
+    import hashlib
+    import hmac
+    exp = str(int(time.time()) + SESSION_DAYS * 86400)
+    sig = hmac.new(_session_key(), exp.encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}"
+
+
+def _valid_session(token: str | None) -> bool:
+    import hashlib
+    import hmac
+    if not token or "." not in token:
+        return False
+    exp, _, sig = token.partition(".")
+    good = hmac.new(_session_key(), exp.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, good) and exp.isdigit() and int(exp) > time.time()
 
 
 @app.middleware("http")
 async def _password_gate(request: Request, call_next):
-    if not APP_PASSWORD or request.url.path == "/api/health":
+    path = request.url.path
+    if (not APP_PASSWORD or path in PUBLIC_PATHS or path.startswith("/static/")
+            or _valid_session(request.cookies.get(SESSION_COOKIE))):
         return await call_next(request)
-    import base64
+    if path.startswith("/api/"):
+        return JSONResponse(status_code=401, content={"detail": "Please log in again."})
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/login", status_code=303)
+
+
+class LoginBody(BaseModel):
+    password: str
+
+
+@app.post("/api/login")
+async def login(body: LoginBody, request: Request):
+    import asyncio
     import secrets
-    header = request.headers.get("authorization", "")
-    if header.lower().startswith("basic "):
-        try:
-            _, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-            if secrets.compare_digest(pw, APP_PASSWORD):
-                return await call_next(request)
-        except Exception:
-            pass
-    return JSONResponse(status_code=401, content={"detail": "Password required"},
-                        headers={"WWW-Authenticate": 'Basic realm="Category Lab"'})
+    if not APP_PASSWORD:
+        return {"ok": True}
+    if not secrets.compare_digest(body.password.encode(), APP_PASSWORD.encode()):
+        await asyncio.sleep(0.8)                      # slow down guessing
+        raise HTTPException(401, "Wrong password.")
+    resp = JSONResponse({"ok": True})
+    secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    resp.set_cookie(SESSION_COOKIE, _make_session(), max_age=SESSION_DAYS * 86400,
+                    httponly=True, secure=secure, samesite="lax", path="/")
+    return resp
+
+
+@app.post("/api/logout")
+def logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse(os.path.join(FRONTEND, "login.html"))
 
 
 @app.get("/api/health")
@@ -140,6 +195,7 @@ def meta():
     return {
         "year": current_year(),
         "default_system": E.DEFAULT_SYSTEM,
+        "auth": bool(APP_PASSWORD),
         "systems": [{"key": s.key, "label": s.label, "blurb": s.blurb, "spec": s.spec()}
                     for s in E.SYSTEMS.values()],
         "options": {"reference": E.REFERENCES, "weights": E.WEIGHT_LABELS,
@@ -356,6 +412,18 @@ def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str =
                        "mpg": round(float(r["mpg"]), 1)},
             "current": detail(cur), "target": detail(tgt), "target_key": target,
             "singles": singles, "path": path, "presets": presets}
+
+
+@app.get("/api/league/{key}/fit")
+def team_fit(key: str, team_id: int, split: str = "season", system: str = E.DEFAULT_SYSTEM,
+             punt: str = ""):
+    """How much each player would change this team's typical-week odds."""
+    lg, p, used, pool, _, _ = _league_ctx(key, split, _system(system), "")
+    if team_id not in {t["id"] for t in p["teams"]}:
+        raise HTTPException(404, "No such team in this league.")
+    res = FIT.team_fit(p, pool, team_id)
+    res["split"] = used
+    return _json_safe(res)
 
 
 class StreamBody(BaseModel):

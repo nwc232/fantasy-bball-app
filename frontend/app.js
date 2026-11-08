@@ -20,6 +20,10 @@ const LABEL = { pts: "PTS", fg3m: "3PM", reb: "REB", ast: "AST", stl: "STL", blk
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (r.status === 401 && !path.startsWith("/api/login")) {
+    location.href = "/login";                       // session expired or password changed
+    throw new Error("Please log in again.");
+  }
   let body = null;
   try { body = await r.json(); } catch {}
   if (!r.ok) throw new Error((body && body.detail) || `Request failed (${r.status})`);
@@ -129,6 +133,7 @@ async function init() {
     $(s).addEventListener("input", () => { S.show = 200; renderRankings(); }));
   $("#minGp").addEventListener("input", () => { S.minGpTouched = true; });
   ["#teams", "#roster"].forEach((s) => $(s).addEventListener("change", loadRankings));
+  $$("#sortMode button").forEach((b) => b.addEventListener("click", () => setSortMode(b.dataset.m)));
   $("#more").addEventListener("click", () => { S.show += 200; renderRankings(); });
   $("#lgImport").addEventListener("click", importLeague);
   $("#refreshBtn").addEventListener("click", hardRefresh);
@@ -139,11 +144,21 @@ async function init() {
   setInterval(() => { if (!document.hidden) refreshAll(); }, 10 * 60 * 1000);
   setInterval(renderUpdated, 30 * 1000);
   $("#lgDemo").addEventListener("click", () => loadLeagueKey(null, true));
+  if (S.meta.auth) {
+    $("#logoutBtn").classList.remove("hidden");
+    $("#logoutBtn").addEventListener("click", async () => {
+      try { await fetch("/api/logout", { method: "POST" }); } catch {}
+      location.href = "/login";
+    });
+  }
   $("#myTeam").addEventListener("change", () => {
     S.myTeam = +$("#myTeam").value; store.set("myTeam", S.myTeam); S.selTeam = S.myTeam;
-    renderLeague(); renderMatchups(); setupTrade(true);
+    S.fit = null;
+    renderLeague(); renderMatchups(); setupTrade(true); renderRankings();
+    if (S.sortMode === "fit") loadFit();
     S.stream = null; $("#sAdds").value = "";
     $("#sOut").innerHTML = `<p class="meta">Press <b>Plan my week</b> to find the best adds for your current matchup.</p>`;
+    if ($("#tab-stream").classList.contains("on")) runStream(true);
   });
   $("#period").addEventListener("change", () => loadLeague());
   $("#tRun").addEventListener("click", runTrade);
@@ -190,7 +205,26 @@ function renderPuntChips(cats) {
     refreshAll();
   }));
 }
-function refreshAll() { loadRankings(); if (S.leagueKey) loadLeague(); }
+function refreshAll() { S.fit = null; loadRankings(); if (S.leagueKey) loadLeague(); if (S.sortMode === "fit") loadFit(); }
+
+/* ---------- fit for my team ---------- */
+function setSortMode(m) {
+  S.sortMode = m;
+  $$("#sortMode button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+  S.sort = m === "fit" ? { key: "fit", dir: -1 } : { key: "value", dir: -1 };
+  if (m === "fit" && !S.fit) loadFit(); else renderRankings();
+}
+async function loadFit() {
+  if (!S.leagueKey) return;
+  $("#source").textContent = "Working out fit for your team…";
+  try {
+    S.fit = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/fit?` +
+      qs({ team_id: S.myTeam, split: $("#split").value }));
+  } catch (e) { $("#source").textContent = e.message; return; }
+  if (S.rank) $("#source").textContent = `Data: ${S.rank.source}`;
+  renderRankings();
+}
+function fitOf(p) { const f = S.fit && S.fit.players[p.id]; return f && f.fit != null ? f.fit : null; }
 async function hardRefresh() {
   const b = $("#refreshBtn"); b.disabled = true; b.textContent = "↻ Refreshing…";
   try {
@@ -237,6 +271,8 @@ function rankColumns(cats, withOwner, withSlot) {
   cols.push({ k: "g", t: "GP", f: (p) => p.g }, { k: "mpg", t: "MPG", f: (p) => p.mpg });
   cats.forEach((c) => cols.push({ k: "c_" + c, t: LABEL[c], cat: c, f: (p) => $("#showValues").checked ? p.v[c] : (c === "fg" || c === "ft" ? p.v[c] : p.stats[c]) }));
   cols.push({ k: "value", t: "Value", f: (p) => p.value });
+  if (S.sortMode === "fit" && S.fit) cols.push({ k: "fit", t: S.fit.unit === "pts" ? "Fit (win %)" : "Fit (cats)", f: (p) => fitOf(p) ?? -1e9,
+    title: "Change in your weekly odds: for other players, if he took the spot of the player listed; for yours, how much better he is than the best free agent" });
   if (dur) cols.push({ k: "dropped", t: "Dropped", f: (p) => p.dropped || "" });
   return cols;
 }
@@ -260,6 +296,13 @@ function playerRowHTML(p, cols, cats) {
       return `<td class="cat${punted}" style="${heat(p.v[c.cat])}" title="${title}">${txt}</td>`;
     }
     if (c.k === "value") return `<td><b>${p.value.toFixed(2)}</b></td>`;
+    if (c.k === "fit") {
+      const f = S.fit.players[p.id];
+      if (!f || f.fit == null) return `<td class="meta">–</td>`;
+      const dg = S.fit.unit === "pts" ? 1 : 2;
+      const note = f.kind === "add" ? `for ${esc(f.swap)}` : `vs ${esc(f.swap)}`;
+      return `<td class="fitcell"><b class="${f.fit > 0 ? "up" : f.fit < 0 ? "down" : "meta"}">${f.fit > 0 ? "+" : ""}${f.fit.toFixed(dg)}</b><br><span class="meta">${note}</span></td>`;
+    }
     if (c.k === "dropped") return `<td class="dropped">${esc(p.dropped)}</td>`;
     if (c.k === "slot") return `<td class="l meta">${c.f(p)}</td>`;
     return `<td>${c.f(p)}</td>`;
@@ -302,6 +345,8 @@ function renderRankings() {
     renderRankings();
   }));
   $("#leagueSizeWrap").classList.toggle("hidden", withOwner);
+  $("#sortMode").classList.toggle("hidden", !withOwner);
+  if (!withOwner && S.sortMode === "fit") { S.sortMode = "value"; }
 }
 
 /* ---------- explain ---------- */
@@ -395,6 +440,7 @@ async function loadLeague(first) {
   if (!ids.includes(S.selTeam)) S.selTeam = S.myTeam;
   $("#myTeam").innerHTML = L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   $("#myTeam").value = S.myTeam;
+  $("#teamWrap").classList.remove("hidden");
   $("#ownerFilter").innerHTML = `<option value="">All players</option><option value="fa">Free agents</option>` +
     L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   $("#period").innerHTML = L.periods.map((n) => `<option value="${n}">Week ${n}${n === L.current_period ? " (current)" : ""}</option>`).join("");
@@ -748,6 +794,8 @@ function renderMethod() {
     <li><b>Minus 1 hurt in this setup, with a big caveat:</b> the simulated drafter just takes the highest-ranked player and never builds around a punt, which is exactly what Minus 1 is for. These results show it's a weak <i>straight ranking</i>, not that it's a bad team-building tool.</li>
   </ul>
   <p>Other limits: one season, opponents all draft the same way, no waiver streaming, every game counts. Treat the results as directional.</p>
+  <h2>Fit for my team</h2>
+  <p>For a player not on your team, Fit is the change in your typical-week odds against every other team if he replaced whichever of your players he'd best replace. For your own players, it's how much better your team is with him than with the best free agent (waivers included) in his place. It's measured in win-chance points for most-categories leagues and in expected categories for each-category leagues. Fit uses the real scoring, so categories you're punting add little on their own.</p>
   <h2>Streaming planner</h2>
   <p>Week total = this week's actual stats so far (from ESPN) + projected remaining games. A remaining game counts only if:</p>
   <ul>
