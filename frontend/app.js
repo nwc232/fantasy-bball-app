@@ -133,7 +133,7 @@ async function init() {
     $(s).addEventListener("input", () => { S.show = 200; renderRankings(); }));
   $("#minGp").addEventListener("input", () => { S.minGpTouched = true; });
   ["#teams", "#roster"].forEach((s) => $(s).addEventListener("change", loadRankings));
-  $$("#sortMode button").forEach((b) => b.addEventListener("click", () => setSortMode(b.dataset.m)));
+
   $("#more").addEventListener("click", () => { S.show += 200; renderRankings(); });
   $("#lgImport").addEventListener("click", importLeague);
   $("#refreshBtn").addEventListener("click", hardRefresh);
@@ -153,9 +153,9 @@ async function init() {
   }
   $("#myTeam").addEventListener("change", () => {
     S.myTeam = +$("#myTeam").value; store.set("myTeam", S.myTeam); S.selTeam = S.myTeam;
-    S.fit = null;
+    S.build = null; S.buildPunts = null;
     renderLeague(); renderMatchups(); setupTrade(true); renderRankings();
-    if (S.sortMode === "fit") loadFit();
+    if ($("#tab-build").classList.contains("on")) loadBuild();
     S.stream = null; $("#sAdds").value = "";
     $("#sOut").innerHTML = `<p class="meta">Press <b>Plan my week</b> to find the best adds for your current matchup.</p>`;
     if ($("#tab-stream").classList.contains("on")) runStream(true);
@@ -176,7 +176,7 @@ async function init() {
   }
   renderMethod();
   const hash = location.hash.replace("#", "");
-  if (["rankings", "league", "matchups", "stream", "trade", "method"].includes(hash)) showTab(hash);
+  if (["rankings", "league", "build", "matchups", "stream", "trade", "method"].includes(hash)) showTab(hash);
   await loadRankings();
   if (saved && saved.demo) loadLeagueKey(null, true);
   else if (saved && saved.league_id) importLeague(true);
@@ -184,6 +184,7 @@ async function init() {
 
 function showTab(t) {
   if (t === "stream" && S.leagueKey && !S.stream) setTimeout(() => runStream(true), 0);
+  if (t === "build" && S.leagueKey && !S.build) setTimeout(() => loadBuild(), 0);
   $$("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   $$(".tab").forEach((s) => s.classList.toggle("on", s.id === "tab-" + t));
   try { history.replaceState(null, "", "#" + t); } catch {}
@@ -205,26 +206,7 @@ function renderPuntChips(cats) {
     refreshAll();
   }));
 }
-function refreshAll() { S.fit = null; loadRankings(); if (S.leagueKey) loadLeague(); if (S.sortMode === "fit") loadFit(); }
-
-/* ---------- fit for my team ---------- */
-function setSortMode(m) {
-  S.sortMode = m;
-  $$("#sortMode button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
-  S.sort = m === "fit" ? { key: "fit", dir: -1 } : { key: "value", dir: -1 };
-  if (m === "fit" && !S.fit) loadFit(); else renderRankings();
-}
-async function loadFit() {
-  if (!S.leagueKey) return;
-  $("#source").textContent = "Working out fit for your team…";
-  try {
-    S.fit = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/fit?` +
-      qs({ team_id: S.myTeam, split: $("#split").value }));
-  } catch (e) { $("#source").textContent = e.message; return; }
-  if (S.rank) $("#source").textContent = `Data: ${S.rank.source}`;
-  renderRankings();
-}
-function fitOf(p) { const f = S.fit && S.fit.players[p.id]; return f && f.fit != null ? f.fit : null; }
+function refreshAll() { S.build = null; loadRankings(); if (S.leagueKey) loadLeague(); if ($("#tab-build").classList.contains("on")) loadBuild(); }
 async function hardRefresh() {
   const b = $("#refreshBtn"); b.disabled = true; b.textContent = "↻ Refreshing…";
   try {
@@ -271,8 +253,7 @@ function rankColumns(cats, withOwner, withSlot) {
   cols.push({ k: "g", t: "GP", f: (p) => p.g }, { k: "mpg", t: "MPG", f: (p) => p.mpg });
   cats.forEach((c) => cols.push({ k: "c_" + c, t: LABEL[c], cat: c, f: (p) => $("#showValues").checked ? p.v[c] : (c === "fg" || c === "ft" ? p.v[c] : p.stats[c]) }));
   cols.push({ k: "value", t: "Value", f: (p) => p.value });
-  if (S.sortMode === "fit" && S.fit) cols.push({ k: "fit", t: S.fit.unit === "pts" ? "Fit (win %)" : "Fit (cats)", f: (p) => fitOf(p) ?? -1e9,
-    title: "Change in your weekly odds: for other players, if he took the spot of the player listed; for yours, how much better he is than the best free agent" });
+
   if (dur) cols.push({ k: "dropped", t: "Dropped", f: (p) => p.dropped || "" });
   return cols;
 }
@@ -296,13 +277,6 @@ function playerRowHTML(p, cols, cats) {
       return `<td class="cat${punted}" style="${heat(p.v[c.cat])}" title="${title}">${txt}</td>`;
     }
     if (c.k === "value") return `<td><b>${p.value.toFixed(2)}</b></td>`;
-    if (c.k === "fit") {
-      const f = S.fit.players[p.id];
-      if (!f || f.fit == null) return `<td class="meta">–</td>`;
-      const dg = S.fit.unit === "pts" ? 1 : 2;
-      const note = f.kind === "add" ? `for ${esc(f.swap)}` : `vs ${esc(f.swap)}`;
-      return `<td class="fitcell"><b class="${f.fit > 0 ? "up" : f.fit < 0 ? "down" : "meta"}">${f.fit > 0 ? "+" : ""}${f.fit.toFixed(dg)}</b><br><span class="meta">${note}</span></td>`;
-    }
     if (c.k === "dropped") return `<td class="dropped">${esc(p.dropped)}</td>`;
     if (c.k === "slot") return `<td class="l meta">${c.f(p)}</td>`;
     return `<td>${c.f(p)}</td>`;
@@ -345,8 +319,7 @@ function renderRankings() {
     renderRankings();
   }));
   $("#leagueSizeWrap").classList.toggle("hidden", withOwner);
-  $("#sortMode").classList.toggle("hidden", !withOwner);
-  if (!withOwner && S.sortMode === "fit") { S.sortMode = "value"; }
+
 }
 
 /* ---------- explain ---------- */
@@ -530,6 +503,94 @@ function renderMatchups() {
   }).join("");
 }
 const fmtLive = (c, v) => v == null ? "–" : (c === "fg" || c === "ft" ? pct(v) : Math.round(v));
+
+/* ---------- team build ---------- */
+async function loadBuild() {
+  if (!S.leagueKey) return;
+  $("#bOut").innerHTML = `<p class="meta">Analysing your roster…</p>`;
+  const p = { ...params(), team_id: S.myTeam };
+  delete p.punt;
+  if (S.buildPunts != null) p.build = S.buildPunts.length ? S.buildPunts.join(",") : "none";
+  try { S.build = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/build?` + qs(p)); }
+  catch (e) { $("#bOut").innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  renderBuild();
+}
+
+function renderBuild() {
+  const B = S.build;
+  const sysLabel = $("#system").selectedOptions[0].textContent;
+  const puntName = (ps) => ps.length ? "Punt " + ps.map((c) => LABEL[c]).join(" + ") : "No punt";
+  const cur = B.build;
+  const tile = (x) => {
+    const t = x.win_pct >= 60 ? "strong" : x.win_pct >= 45 ? "swing" : "weak";
+    const punted = cur.punts.includes(x.cat);
+    return `<div class="ptile ${t} ${punted ? "punted" : ""}"><div class="c">${LABEL[x.cat]}</div><div class="w">${x.win_pct.toFixed(0)}%</div><div class="r meta">${x.rank}${["st","nd","rd"][x.rank - 1] || "th"} of ${x.of}</div></div>`;
+  };
+  const tagCls = { core: "up", fits: "meta", "doesn't fit": "down", "no stats": "meta" };
+  const rk = (n) => n == null ? "–" : `#${n}`;
+  const statChips = (v) => B.cats.filter((c) => !cur.punts.includes(c))
+    .map((c) => `<span class="schip" style="${heat(v[c])}">${LABEL[c]}</span>`).join("");
+  const misfits = B.players.filter((m) => m.label === "doesn't fit");
+
+  $("#bOut").innerHTML = `
+    <div class="s-head"><div>
+      <h2>What should ${esc(B.team.name)} build around?</h2>
+      <div class="meta">Win ${B.need} of ${B.cats.length} categories each week. In a typical week you currently win <b>${B.winning_now}</b>. Player ranks use ${esc(sysLabel)} (${esc(S.meta.splits[B.split] || B.split)} stats).</div>
+    </div></div>
+
+    <h3 style="margin-top:6px">Where your team stands <span class="hint">· chance to win each category in a typical week vs the league</span></h3>
+    <div class="ptiles">${B.profile.map(tile).join("")}</div>
+
+    <h3>Builds that suit your roster <span class="hint">· click one to analyse it</span></h3>
+    <div class="builds">${B.builds.map((b, i) => {
+      const on = JSON.stringify([...b.punts].sort()) === JSON.stringify([...cur.punts].sort());
+      return `<button class="bcard ${on ? "on" : ""}" data-punts="${b.punts.join(",")}">
+        <div class="bt">${puntName(b.punts)}${i === 0 ? ' <span class="rec">recommended</span>' : ""}</div>
+        <div class="bm">Roster ranks <b>${b.team_rank}${["st","nd","rd"][b.team_rank - 1] || "th"}</b> of ${b.of} for this build</div>
+        <div class="meta">Already winning ${b.winning} of the ${b.targets.length} categories you'd keep</div></button>`;
+    }).join("")}</div>
+    <p class="note">Each build re-values every player without the punted categories, then compares your roster with every other team's. Punting a category you currently win counts against a build; punting one you lose most weeks costs little. With no punts your roster ranks ${B.no_punt.team_rank} of ${B.no_punt.of}.</p>
+
+    <h3>Your roster in this build: ${puntName(cur.punts)}</h3>
+    <div class="table-wrap"><table class="grid"><thead><tr><th class="l">Player</th><th>Normal rank</th><th>Build rank</th><th>Change</th><th class="l">Fit</th><th class="l">Strengths for this build</th></tr></thead><tbody>
+      ${B.players.map((m) => `<tr><td class="l clickable" data-pid="${esc(m.id)}"><span class="name">${esc(m.name)}</span>${m.injury ? `<span class="inj">${esc(m.injury)}</span>` : ""}<br><span class="meta">${esc(m.team)} · ${esc(m.pos)}</span></td>
+        <td>${rk(m.std_rank)}</td><td><b>${rk(m.build_rank)}</b></td>
+        <td>${m.delta == null ? "" : m.delta === 0 ? '<span class="meta">–</span>' : `<span class="${m.delta < 0 ? "up" : "down"}">${m.delta < 0 ? "▲" : "▼"}${Math.abs(m.delta)}</span>`}</td>
+        <td class="l"><span class="${tagCls[m.label]}"><b>${m.label}</b></span></td>
+        <td class="l">${m.v ? statChips(m.v) : ""}</td></tr>`).join("")}
+    </tbody></table></div>
+
+    <h3>Swap ideas <span class="hint">· similar normal rank (a similar trade price), much better fit for this build</span></h3>
+    ${misfits.length ? misfits.map((m) => {
+      const ts = B.targets[m.id] || [];
+      return `<div class="card swapcard"><div class="sw-head"><b>${esc(m.name)}</b> <span class="meta">normal ${rk(m.std_rank)} · build ${rk(m.build_rank)}</span></div>
+        ${ts.length ? `<table class="grid"><tbody>${ts.map((t) => `<tr>
+          <td class="l clickable" data-pid="${esc(t.id)}"><span class="name">${esc(t.name)}</span>${t.injury ? `<span class="inj">${esc(t.injury)}</span>` : ""} <span class="meta">${esc(t.team)} · ${esc(t.pos)}</span><br><span class="meta">${esc(t.owner)}</span></td>
+          <td>normal ${rk(t.std_rank)}</td><td>build <b>${rk(t.build_rank)}</b></td>
+          <td class="l">${statChips(t.v)}</td>
+          <td><button class="ghost small trybtn" data-give="${esc(m.id)}" data-get="${esc(t.id)}" data-owner="${t.owner_id}">${t.owner_id ? "Analyze trade →" : "Analyze add/drop →"}</button></td></tr>`).join("")}</tbody></table>`
+          : `<p class="meta">No similarly ranked player fits this build clearly better.</p>`}</div>`;
+    }).join("") : `<div class="card meta">Everyone on your roster fits this build reasonably well.</div>`}
+    <div class="row" style="margin-top:14px">
+      <button class="ghost" id="bRank">Rank all players for this build →</button>
+      <span class="hint">Sets the punt buttons to this build and opens Rankings.</span></div>`;
+
+  $$(".bcard").forEach((b) => b.addEventListener("click", () => {
+    S.buildPunts = b.dataset.punts ? b.dataset.punts.split(",") : [];
+    loadBuild();
+  }));
+  $$(".trybtn").forEach((b) => b.addEventListener("click", () => {
+    S.trade.a = S.myTeam; S.trade.b = +b.dataset.owner;
+    resetSel(); S.trade.aGive.add(b.dataset.give); S.trade.bGive.add(b.dataset.get);
+    $("#tA").value = S.trade.a; $("#tB").value = S.trade.b;
+    renderTradeLists(); showTab("trade"); runTrade();
+  }));
+  $("#bRank").addEventListener("click", () => {
+    S.punts = new Set(cur.punts); store.set("punts", [...S.punts]);
+    renderPuntChips(S.league.cats); showTab("rankings"); refreshAll();
+  });
+  bindExplain("#bOut");
+}
 
 /* ---------- streaming ---------- */
 function dropKey() { return `drops:${S.leagueKey}:${S.myTeam}`; }
@@ -794,8 +855,9 @@ function renderMethod() {
     <li><b>Minus 1 hurt in this setup, with a big caveat:</b> the simulated drafter just takes the highest-ranked player and never builds around a punt, which is exactly what Minus 1 is for. These results show it's a weak <i>straight ranking</i>, not that it's a bad team-building tool.</li>
   </ul>
   <p>Other limits: one season, opponents all draft the same way, no waiver streaming, every game counts. Treat the results as directional.</p>
-  <h2>Fit for my team</h2>
-  <p>For a player not on your team, Fit is the change in your typical-week odds against every other team if he replaced whichever of your players he'd best replace. For your own players, it's how much better your team is with him than with the best free agent (waivers included) in his place. It's measured in win-chance points for most-categories leagues and in expected categories for each-category leagues. Fit uses the real scoring, so categories you're punting add little on their own.</p>
+  <h2>Team build</h2>
+  <p>Your weekly win % in each category comes from the same typical-week model as power rankings. Every realistic punt set (up to 3 in a 9-cat league, since you need to win 5) is tried. For each one, every player is re-valued with your ranking system minus the punted categories, and your roster's total is compared with every other team's, as a z-score across teams. A build's score is that z-score minus a cost per punt: 0.15, plus 1.5 × (your weekly win chance − 35%) when you currently win that category more than 35% of the time. So punting a category you lose most weeks costs little, and punting a strength costs a lot.</p>
+  <p>A player "doesn't fit" when his build rank is worse than his normal rank by more than 10 spots or 25% of his rank, whichever is larger. Swap ideas are players with a normal rank within about ±30% of his (a similar trade price) who rank higher in the build.</p>
   <h2>Streaming planner</h2>
   <p>Week total = this week's actual stats so far (from ESPN) + projected remaining games. A remaining game counts only if:</p>
   <ul>

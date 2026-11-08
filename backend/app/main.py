@@ -18,7 +18,7 @@ from . import engine as E
 from . import espn
 from . import league as L
 from . import stream as ST
-from . import fit as FIT
+from . import build as BUILD
 from .store import STORE, current_year
 
 app = FastAPI(title="Fantasy Category Rankings")
@@ -414,14 +414,24 @@ def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str =
             "singles": singles, "path": path, "presets": presets}
 
 
-@app.get("/api/league/{key}/fit")
-def team_fit(key: str, team_id: int, split: str = "season", system: str = E.DEFAULT_SYSTEM,
-             punt: str = ""):
-    """How much each player would change this team's typical-week odds."""
-    lg, p, used, pool, _, _ = _league_ctx(key, split, _system(system), "")
+@app.get("/api/league/{key}/build")
+def team_build(key: str, team_id: int, split: str = "season", system: str = E.DEFAULT_SYSTEM,
+               build: str | None = None, m1: int | None = None, ref: str | None = None,
+               center: str | None = None, transform: int | None = None,
+               weights: str | None = None, tov: float | None = None):
+    """Build advisor: which categories to build around, who doesn't fit, swap ideas.
+    build: comma-separated punts to analyse ('none' for no punts); default = recommended."""
+    sy = _system(system, ref, center, transform, weights, tov, m1)
+    lg = STORE.league(key)
+    if not lg:
+        raise HTTPException(404, "League not loaded; import it again.")
+    p = lg["parsed"]
     if team_id not in {t["id"] for t in p["teams"]}:
         raise HTTPException(404, "No such team in this league.")
-    res = FIT.team_fit(p, pool, team_id)
+    used, df = _pick_split(lg["frames"], split)
+    punts = None if build is None else ([] if build in ("", "none") else
+                                        [c for c in build.split(",") if c in p["cats"]])
+    res = BUILD.advise(p, df, sy, team_id, punts)
     res["split"] = used
     return _json_safe(res)
 
