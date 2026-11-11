@@ -8,7 +8,14 @@ Live 9-cat fantasy basketball rankings with punts, plus ESPN league import, H2H 
   - **Builds:** it tries every realistic punt set (up to 3 in a 9-cat league) and re-values every player for each one with your chosen ranking system. It ranks builds by how your roster compares with every other team's, minus a cost for punting categories you currently win.
   - **Misfits:** for the chosen build, your players whose build rank is far worse than their normal rank, so other managers value them more than your build does.
   - **Swap ideas:** for each misfit, players with a similar normal rank (a similar trade price) who fit the build much better. One click sends a swap to the trade analyzer, and "Rank all players for this build" applies the build's punts on the Rankings tab.
-- **Why this rank?**: click any player's name. It shows his rank under every system, which setting moves him most between your system and another (e.g. Category Lab vs DURANT H2H), and his category values side by side.
+- **Player card**: click any player's name. It shows:
+  - his rank and category strengths under your system, and his fit for your team's build
+  - per-game stats in every window (this season, last 7/15/30 days, ESPN projection, last season)
+  - his schedule this week and next
+  - his recent game log, ESPN news and career averages by season, loaded from ESPN's public site API. These are best effort: if ESPN changes a format, only that section says it's unavailable.
+
+  A link at the bottom opens the ranking-system comparison.
+- **Pickups**: free agents and waiver players ranked for your team's build (the recommended one, or any build you pick). It shows each player's normal rank, his trend over the last 15 days, games left this week and over the next 7 days, % rostered, and ▲ for players who'd be an upgrade on your weakest-fitting player. You can filter by position, waivers vs free agents, and upgrades only.
 - **Refresh**: the ↻ button re-pulls ESPN stats and your league rosters. The page also refreshes on its own every 10 minutes while it's open, and the server re-pulls a league once its data is over 10 minutes old.
 - **League**: import an ESPN league (public, or private with your cookies). Shows each team's projected weekly category totals, category ranks, and all-play win % against every other team.
 - **Matchups**: win probability for every matchup in a given week, plus odds per category. Games are counted from the real NBA schedule and capped at your daily starting slots.

@@ -160,9 +160,10 @@ async function init() {
   }
   $("#myTeam").addEventListener("change", () => {
     S.myTeam = +$("#myTeam").value; store.set("myTeam", S.myTeam); S.selTeam = S.myTeam;
-    S.build = null; S.buildPunts = null;
+    S.build = null; S.buildPunts = null; S.pickups = null;
     renderLeague(); renderMatchups(); setupTrade(true); renderRankings();
     if ($("#tab-build").classList.contains("on")) loadBuild();
+    if ($("#tab-pickups").classList.contains("on")) loadPickups();
     S.stream = null; $("#sAdds").value = "";
     $("#sOut").innerHTML = `<p class="meta">Press <b>Plan my week</b> to find the best adds for your current matchup.</p>`;
     if ($("#tab-stream").classList.contains("on")) runStream(true);
@@ -170,6 +171,15 @@ async function init() {
   $("#period").addEventListener("change", () => loadLeague());
   $("#tRun").addEventListener("click", runTrade);
   $("#sRun").addEventListener("click", () => runStream(false));
+  $("#pkBuild").addEventListener("change", () => {
+    const v = $("#pkBuild").value; S.buildPunts = v === "none" ? [] : v.split(","); S.build = null; loadPickups();
+  });
+  ["#pkAvail", "#pkUpg"].forEach((id) => $(id).addEventListener("change", renderPickups));
+  S.pkPos = new Set();
+  $$("#pkPos .chip").forEach((b) => b.addEventListener("click", () => {
+    const v = b.dataset.p; S.pkPos.has(v) ? S.pkPos.delete(v) : S.pkPos.add(v);
+    b.classList.toggle("on", S.pkPos.has(v)); renderPickups();
+  }));
   ["#sWeek", "#sMode"].forEach((id) => $(id).addEventListener("change", () => runStream(true)));
   $("#tClear").addEventListener("click", () => { setupTrade(true); $("#tResult").innerHTML = ""; });
   $("#tA").addEventListener("change", () => { S.trade.a = +$("#tA").value; resetSel(); renderTradeLists(); });
@@ -183,7 +193,7 @@ async function init() {
   }
   renderMethod();
   const hash = location.hash.replace("#", "");
-  if (["rankings", "league", "build", "matchups", "stream", "trade", "method"].includes(hash)) showTab(hash);
+  if (["rankings", "league", "build", "pickups", "matchups", "stream", "trade", "method"].includes(hash)) showTab(hash);
   await loadRankings();
   if (saved && saved.demo) loadLeagueKey(null, true);
   else if (saved && saved.league_id) importLeague(true);
@@ -192,6 +202,7 @@ async function init() {
 function showTab(t) {
   if (t === "stream" && S.leagueKey && !S.stream) setTimeout(() => runStream(true), 0);
   if (t === "build" && S.leagueKey && !S.build) setTimeout(() => loadBuild(), 0);
+  if (t === "pickups" && S.leagueKey && !S.pickups) setTimeout(() => loadPickups(), 0);
   $$("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   $$(".tab").forEach((s) => s.classList.toggle("on", s.id === "tab-" + t));
   try { history.replaceState(null, "", "#" + t); } catch {}
@@ -213,7 +224,11 @@ function renderPuntChips(cats) {
     refreshAll();
   }));
 }
-function refreshAll() { S.build = null; loadRankings(); if (S.leagueKey) loadLeague(); if ($("#tab-build").classList.contains("on")) loadBuild(); }
+function refreshAll() {
+  S.build = null; S.pickups = null; loadRankings(); if (S.leagueKey) loadLeague();
+  if ($("#tab-build").classList.contains("on")) loadBuild();
+  if ($("#tab-pickups").classList.contains("on")) loadPickups();
+}
 async function hardRefresh() {
   const b = $("#refreshBtn"); b.disabled = true; b.textContent = "↻ Refreshing…";
   try {
@@ -334,9 +349,93 @@ function renderRankings() {
 
 /* ---------- explain ---------- */
 function bindExplain(table) {
-  $$(table + " td.clickable").forEach((td) => td.addEventListener("click", () => openExplain(td.dataset.pid)));
+  $$(table + " td.clickable").forEach((td) => td.addEventListener("click", () => openPlayer(td.dataset.pid)));
 }
-function closeExplain() { $("#explain").classList.add("hidden"); }
+function closeExplain() { $("#explain").classList.add("hidden"); $("#explain").classList.remove("wide-drawer"); }
+
+/* ---------- player card ---------- */
+const WINDOW_COLS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "fg", "ft", "tov"];
+async function openPlayer(pid) {
+  $("#explain").classList.remove("hidden");
+  $("#explain").classList.add("wide-drawer");
+  $("#exBody").innerHTML = `<p class="meta">Loading player…</p>`;
+  const p = { ...params(), teams: $("#teams").value, roster: $("#roster").value, league: S.leagueKey };
+  if (S.leagueKey) p.team_id = S.myTeam;
+  let d;
+  try { d = await api(`/api/player/${encodeURIComponent(pid)}?` + qs(p)); }
+  catch (e) { $("#exBody").innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  const sysLabel = $("#system").selectedOptions[0].textContent;
+  const sn = d.snapshot;
+  const statTd = (w, c) => c === "fg" || c === "ft" ? `<td title="${c === "fg" ? w.fga : w.fta} att/g">${pct(w[c])}</td>` : `<td>${w[c].toFixed(1)}</td>`;
+  const schedRow = (wk) => `<div class="days"><span class="meta">${wk.label}</span>${wk.days.map((x) =>
+    `<div class="day ${x.game ? "game" : ""} ${x.past ? "past" : ""} ${x.today ? "today" : ""}" title="${x.nba_games} NBA games">${x.dow}<br><span style="font-size:10px">${x.date}</span></div>`).join("")}</div>`;
+  const nGames = (wk) => wk.days.filter((x) => x.game && !x.past).length;
+  $("#exBody").innerHTML = `
+    <div class="pc-head"><div>
+      <h2>${esc(d.name)}</h2>
+      <div class="meta">${esc(d.team)} · ${esc(d.pos)}</div>
+      <div class="pc-tags">
+        ${d.injury ? `<span class="tag bad">${esc(d.injury)}</span>` : ""}
+        ${d.owner ? `<span class="tag ${d.owner === "Free agent" || d.owner === "Waivers" ? "acc" : ""}">${esc(d.owner)}</span>` : ""}
+        <span class="tag">${d.owned.toFixed(1)}% rostered on ESPN</span>
+      </div></div></div>
+
+    ${sn ? `<div class="pc-snap">
+      <div class="big">#${sn.rank}</div>
+      <div><b>${esc(sysLabel)}</b> rank · value ${sn.value.toFixed(2)} <span class="meta">(${esc(S.meta.splits[d.split] || d.split)} stats${sn.dropped ? ` · Minus 1 drops ${sn.dropped}` : ""})</span><br>
+        ${d.cats.map((c) => `<span class="schip" style="${heat(sn.v[c])}" title="${sn.v[c]}">${LABEL[c]}</span>`).join("")}</div>
+    </div>` : `<p class="meta">No stats in the selected window.</p>`}
+    ${d.build ? `<div class="callout">For ${esc(d.build.team)}'s build (${d.build.punts.length ? "punt " + d.build.punts.map((c) => LABEL[c]).join(" + ") : "no punts"}):
+      <b>#${d.build.build_rank}</b> vs #${d.build.std_rank} normally
+      ${d.build.build_rank < d.build.std_rank - 5 ? '<span class="up">· fits your build</span>' : d.build.build_rank > d.build.std_rank + 5 ? '<span class="down">· doesn\'t fit your build</span>' : ""}</div>` : ""}
+
+    <h3>Per game, by stats window</h3>
+    <div class="table-wrap"><table class="grid"><thead><tr><th class="l">Window</th><th>GP</th><th>MPG</th>${WINDOW_COLS.map((c) => `<th>${LABEL[c]}</th>`).join("")}</tr></thead><tbody>
+      ${d.windows.map((w) => `<tr class="${w.key === d.split ? "mine" : ""}"><td class="l">${esc(w.label)}</td><td>${w.g}</td><td>${w.mpg}</td>${WINDOW_COLS.map((c) => statTd(w, c)).join("")}</tr>`).join("")}
+    </tbody></table></div>
+
+    ${d.schedule.length ? `<h3>Schedule <span class="hint">· ${d.schedule.map((wk) => `${nGames(wk)} game${nGames(wk) === 1 ? "" : "s"} ${wk.label.toLowerCase()}`).join(" · ")}</span></h3>${d.schedule.map(schedRow).join("")}` : ""}
+
+    <div id="pcEspn">${d.espn_extras ? `<p class="meta">Loading game log, news and career stats from ESPN…</p>`
+      : `<p class="note">Game log, news and career stats come from ESPN and aren't available in the demo.</p>`}</div>
+
+    <p style="margin-top:18px"><button class="ghost small" id="pcWhy">Compare how each ranking system ranks him →</button></p>`;
+  $("#pcWhy").addEventListener("click", () => { $("#explain").classList.remove("wide-drawer"); openExplain(pid); });
+  if (d.espn_extras) loadEspnExtras(pid);
+}
+
+async function loadEspnExtras(pid) {
+  let e;
+  try { e = await api(`/api/player/${encodeURIComponent(pid)}/espn`); }
+  catch (err) { $("#pcEspn").innerHTML = `<p class="warn">${esc(err.message)}</p>`; return; }
+  if (!$("#pcEspn")) return;
+  const pick = (labels, want) => { const s = want.filter((x) => labels.includes(x)); return s.length >= 4 ? s : labels; };
+  const GL = ["MIN", "PTS", "REB", "AST", "STL", "BLK", "3PT", "FG", "FT", "TO"];
+  const CR = ["GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "3PT", "FG%", "FT%", "TO"];
+  const fmtDate = (s) => { const t = new Date(s); return isNaN(t) ? esc(s) : `${t.getMonth() + 1}/${t.getDate()}`; };
+  let html = "";
+  const g = e.gamelog;
+  if (g.error) html += `<h3>Recent games</h3><p class="meta">${esc(g.error)}</p>`;
+  else {
+    const cols = pick(g.labels, GL);
+    html += `<h3>Recent games</h3><div class="table-wrap"><table class="grid"><thead><tr><th class="l">Date</th><th class="l">Opp</th><th class="l">Result</th>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>
+      ${g.games.map((x) => `<tr><td class="l">${fmtDate(x.date)}</td><td class="l">${esc(x.at)} ${esc(x.opp)}</td><td class="l ${x.result === "W" ? "up" : x.result === "L" ? "down" : ""}">${esc(x.result)} ${esc(x.score)}</td>${cols.map((c) => `<td>${esc(x.stats[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>`;
+  }
+  const n = e.news;
+  html += `<h3>News</h3>` + (n.error ? `<p class="meta">${esc(n.error)}</p>` : n.items.map((x) =>
+    `<div class="news-item"><b>${esc(x.headline)}</b>${esc(x.text)} <span class="meta">${x.published ? fmtDate(x.published) : ""}${x.link ? ` · <a href="${esc(x.link)}" target="_blank" rel="noopener">ESPN</a>` : ""}</span></div>`).join(""));
+  const c = e.career;
+  if (c.error) html += `<h3>Career</h3><p class="meta">${esc(c.error)}</p>`;
+  else {
+    const cols = pick(c.labels, CR);
+    html += `<h3>Career averages</h3><div class="table-wrap"><table class="grid"><thead><tr><th class="l">Season</th><th class="l">Team</th>${cols.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>
+      ${[...c.seasons].reverse().map((r) => `<tr><td class="l">${esc(r.season)}</td><td class="l meta">${esc(r.team)}</td>${cols.map((x) => `<td>${esc(r.stats[x] ?? "")}</td>`).join("")}</tr>`).join("")}
+      ${c.career ? `<tr><td class="l"><b>Career</b></td><td></td>${cols.map((x) => `<td><b>${esc(c.career[x] ?? "")}</b></td>`).join("")}</tr>` : ""}
+    </tbody></table></div>`;
+  }
+  $("#pcEspn").innerHTML = html;
+}
 async function openExplain(pid, target) {
   const curKey = $("#system").value;
   target = target || (curKey === S.meta.default_system ? "tz" : S.meta.default_system);
@@ -514,6 +613,54 @@ function renderMatchups() {
 }
 const fmtLive = (c, v) => v == null ? "–" : (c === "fg" || c === "ft" ? pct(v) : Math.round(v));
 
+/* ---------- pickups ---------- */
+async function loadPickups() {
+  if (!S.leagueKey) return;
+  $("#pkOut").innerHTML = `<p class="meta">Ranking available players for your build…</p>`;
+  const p = { ...params(), team_id: S.myTeam };
+  delete p.punt;
+  if (S.buildPunts != null) p.build = S.buildPunts.length ? S.buildPunts.join(",") : "none";
+  try { S.pickups = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/pickups?` + qs(p)); }
+  catch (e) { $("#pkOut").innerHTML = `<p class="warn">${esc(e.message)}</p>`; return; }
+  renderPickups();
+}
+
+function renderPickups() {
+  const R = S.pickups;
+  if (!R) return;
+  const puntName = (ps) => ps.length ? "Punt " + ps.map((c) => LABEL[c]).join(" + ") : "No punt";
+  const key = (ps) => [...ps].sort().join(",");
+  const opts = [...R.builds];
+  if (!opts.some((b) => key(b.punts) === key(R.build.punts))) opts.unshift(R.build);
+  $("#pkBuild").innerHTML = opts.map((b, i) => `<option value="${b.punts.join(",") || "none"}">${puntName(b.punts)}${i === 0 && R.builds[0] && key(b.punts) === key(R.builds[0].punts) ? " (recommended)" : ""}</option>`).join("");
+  $("#pkBuild").value = R.build.punts.join(",") || "none";
+  const av = $("#pkAvail").value;
+  const upg = $("#pkUpg").checked;
+  const pos = S.pkPos || new Set();
+  const rows = R.players.filter((p) =>
+    (av === "avail" || (av === "fa" ? p.status !== "WAIVERS" : p.status === "WAIVERS")) &&
+    (!pos.size || (p.pos || "").split("/").some((x) => pos.has(x))) && (!upg || p.upgrade));
+  const keep = R.build.targets;
+  const w = R.worst;
+  $("#pkOut").innerHTML = `
+    <p class="meta" style="margin-top:0">Ranked for <b>${esc(R.team.name)}</b>'s build: ${puntName(R.build.punts)}.
+      ${w ? `Your weakest fit for this build is <b>${esc(w.name)}</b> (#${w.build_rank} in the build); <span class="up">▲</span> marks players who'd be an upgrade on him.` : ""}
+      ${R.has_trend ? "Trend compares a player's build rank over the last 15 days with the selected window." : ""}</p>
+    <div class="table-wrap"><table class="grid"><thead><tr>
+      <th class="l">Player</th><th>Build rank</th><th>Normal rank</th>${R.has_trend ? "<th>Trend</th>" : ""}
+      <th title="Games left in the current matchup week">Games left this week</th><th>Next 7 days</th><th>% rostered</th><th>GP</th><th class="l">Strengths for this build</th></tr></thead><tbody>
+      ${rows.length ? rows.map((p) => `<tr>
+        <td class="l clickable" data-pid="${esc(p.id)}">${p.upgrade ? '<span class="up" title="Upgrade on your weakest fit">▲</span> ' : ""}<span class="name">${esc(p.name)}</span>${p.injury ? `<span class="inj">${esc(p.injury)}</span>` : ""}${p.status === "WAIVERS" ? ' <span class="tag">waivers</span>' : ""}<br><span class="meta">${esc(p.team)} · ${esc(p.pos)}</span></td>
+        <td><b>#${p.build_rank}</b></td><td class="meta">#${p.std_rank}</td>
+        ${R.has_trend ? `<td>${p.trend == null ? '<span class="meta">–</span>' : p.trend === 0 ? '<span class="meta">–</span>' : `<span class="${p.trend > 0 ? "up" : "down"}">${p.trend > 0 ? "▲" : "▼"}${Math.abs(p.trend)}</span>`}</td>` : ""}
+        <td>${p.games_rest}</td><td>${p.games_7}</td><td class="meta">${p.owned.toFixed(1)}%</td><td class="meta">${p.g}</td>
+        <td class="l">${keep.map((c) => `<span class="schip" style="${heat(p.v[c])}">${LABEL[c]}</span>`).join("")}</td></tr>`).join("")
+        : `<tr><td colspan="9" class="meta l">No available players match these filters.</td></tr>`}
+    </tbody></table></div>
+    <p class="note">Change the build here or on the Team build tab. Click a player for his full card. For this week's matchup specifically, use the Streaming tab.</p>`;
+  bindExplain("#pkOut");
+}
+
 /* ---------- team build ---------- */
 async function loadBuild() {
   if (!S.leagueKey) return;
@@ -587,6 +734,7 @@ function renderBuild() {
 
   $$(".bcard").forEach((b) => b.addEventListener("click", () => {
     S.buildPunts = b.dataset.punts ? b.dataset.punts.split(",") : [];
+    S.pickups = null;
     loadBuild();
   }));
   $$(".trybtn").forEach((b) => b.addEventListener("click", () => {

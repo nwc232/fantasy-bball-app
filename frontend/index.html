@@ -19,6 +19,7 @@
     <button data-tab="rankings" class="on">Rankings</button>
     <button data-tab="league">League</button>
     <button data-tab="build">Team build</button>
+    <button data-tab="pickups">Pickups</button>
     <button data-tab="matchups">Matchups</button>
     <button data-tab="stream">Streaming</button>
     <button data-tab="trade">Trade analyzer</button>
@@ -124,6 +125,24 @@
   <section id="tab-build" class="tab">
     <div class="needs-league">Import a league (or the demo) on the League tab first.</div>
     <div class="league-only hidden"><div id="bOut"><p class="meta">Loading…</p></div></div>
+  </section>
+
+  <!-- PICKUPS -->
+  <section id="tab-pickups" class="tab">
+    <div class="needs-league">Import a league (or the demo) on the League tab first.</div>
+    <div class="league-only hidden">
+      <div class="filters">
+        <label class="inline">Build <select id="pkBuild"></select></label>
+        <select id="pkAvail">
+          <option value="avail">Free agents + waivers</option>
+          <option value="fa">Free agents only</option>
+          <option value="waivers">Waivers only</option>
+        </select>
+        <div class="chips" id="pkPos"><button class="chip" data-p="PG">PG</button><button class="chip" data-p="SG">SG</button><button class="chip" data-p="SF">SF</button><button class="chip" data-p="PF">PF</button><button class="chip" data-p="C">C</button></div>
+        <label class="inline"><input type="checkbox" id="pkUpg"> Upgrades only</label>
+      </div>
+      <div id="pkOut"><p class="meta">Loading…</p></div>
+    </div>
   </section>
 
   <!-- MATCHUPS -->

@@ -435,8 +435,153 @@ def team_build(key: str, team_id: int, split: str = "season", system: str = E.DE
     punts = None if build is None else ([] if build in ("", "none") else
                                         [c for c in build.split(",") if c in p["cats"]])
     res = BUILD.advise(p, df, sy, team_id, punts)
+    res.pop("_pool", None); res.pop("_drops", None)
     res["split"] = used
     return _json_safe(res)
+
+
+@app.get("/api/league/{key}/pickups")
+def team_pickups(key: str, team_id: int, split: str = "season", system: str = E.DEFAULT_SYSTEM,
+                 build: str | None = None, m1: int | None = None, ref: str | None = None,
+                 center: str | None = None, transform: int | None = None,
+                 weights: str | None = None, tov: float | None = None):
+    """Free agents and waiver players ranked for this team's build."""
+    sy = _system(system, ref, center, transform, weights, tov, m1)
+    lg = STORE.league(key)
+    if not lg:
+        raise HTTPException(404, "League not loaded; import it again.")
+    p = lg["parsed"]
+    if team_id not in {t["id"] for t in p["teams"]}:
+        raise HTTPException(404, "No such team in this league.")
+    used, _ = _pick_split(lg["frames"], split)
+    punts = None if build is None else ([] if build in ("", "none") else
+                                        [c for c in build.split(",") if c in p["cats"]])
+    return _json_safe(BUILD.pickups(p, lg["frames"], used, sy, team_id, lg["sched"], punts))
+
+
+# --------------------------------------------------------------------------- #
+# Player card
+# --------------------------------------------------------------------------- #
+WINDOW_ORDER = ["season", "last7", "last15", "last30", "proj", "prev"]
+
+
+def _per_game(r) -> dict:
+    fga, fta = float(r["fga"]), float(r["fta"])
+    return {"g": int(r["g"]), "mpg": round(float(r["mpg"]), 1),
+            **{c: round(float(r[c]), 1) for c in STAT_COLS},
+            "fg": round(float(r["fgm"]) / fga, 3) if fga else None,
+            "ft": round(float(r["ftm"]) / fta, 3) if fta else None,
+            "fga": round(fga, 1), "fta": round(fta, 1)}
+
+
+def _week_schedule(team: str, sched: dict, days: list[int], today: int | None, anchor) -> list[dict]:
+    from . import weeks as W
+    g = sched.get(team) or {}
+    return [{**W.label(d, anchor, i), "game": d in g, "past": today is not None and d < today,
+             "today": d == today, "nba_games": sum(1 for t in sched.values() if d in t) // 2}
+            for i, d in enumerate(days)]
+
+
+@app.get("/api/player/{pid}")
+def player_card(pid: str, year: int = 0, split: str = "season", system: str = E.DEFAULT_SYSTEM,
+                punt: str = "", teams: int = 12, roster: int = 13, league: str | None = None,
+                team_id: int | None = None, m1: int | None = None, ref: str | None = None,
+                center: str | None = None, transform: int | None = None,
+                weights: str | None = None, tov: float | None = None):
+    from datetime import datetime
+    from . import weeks as W
+    sy = _system(system, ref, center, transform, weights, tov, m1)
+    year = year or current_year()
+    p = None
+    cats = E.CATS
+    if league:
+        lg = STORE.league(league)
+        if not lg:
+            raise HTTPException(404, "League not loaded; import it again.")
+        p, frames, sched = lg["parsed"], lg["frames"], lg["sched"]
+        cats = p["cats"]
+        teams, roster = len(p["teams"]), p["roster_size"]
+    else:
+        frames, _ = STORE.pool(year)
+        sched = STORE.schedule(year)
+    used, df = _pick_split(frames, split)
+
+    info = None
+    for k in [used] + WINDOW_ORDER:
+        f = frames.get(k)
+        if f is not None and (f["id"] == pid).any():
+            info = f[f["id"] == pid].iloc[0]
+            break
+    if info is None:
+        raise HTTPException(404, "Player not found.")
+
+    use = [c for c in cats if c not in _punts(punt)] or cats
+    sc = E.score(df, sy, cats=use, pool_size=teams * roster)
+    snap = None
+    if (df["id"] == pid).any():
+        i = df.index[df["id"] == pid][0]
+        rank = int(sc["value"].rank(ascending=False, method="min")[i])
+        snap = {"rank": rank, "of": int(len(df)), "value": round(float(sc.at[i, "value"]), 3),
+                "dropped": sc.at[i, "dropped"],
+                "v": {c: round(float(sc.at[i, f"v_{c}"]), 2) for c in cats}}
+
+    windows = []
+    for k in WINDOW_ORDER:
+        f = frames.get(k)
+        if f is None:
+            continue
+        m = f[(f["id"] == pid) & (f["g"] > 0)]
+        if len(m):
+            windows.append({"key": k, "label": espn.SPLITS[k][0], **_per_game(m.iloc[0])})
+
+    owner, build = None, None
+    ft = int(info.get("fantasy_team", 0) or 0)
+    if p:
+        names = {t["id"]: t["name"] for t in p["teams"]}
+        owner = names.get(ft) if ft > 0 else ("Rostered" if ft < 0 else
+                                              "Waivers" if info.get("status") == "WAIVERS" else "Free agent")
+        if team_id and snap:
+            res = BUILD.advise(p, df, sy, team_id)
+            pv = res["_pool"]
+            if pid in pv.index:
+                b = res["build"]
+                build = {"punts": b["punts"], "build_rank": int(pv.at[pid, "build_rank"]),
+                         "std_rank": int(pv.at[pid, "rank"]), "team": res["team"]["name"]}
+
+    # this week and next
+    anchor = (p or {}).get("anchor") or W.anchor_from_schedule(sched)
+    sched_out = []
+    if p:
+        cur = p["current_period"]
+        for per in (cur, cur + 1):
+            days = p["matchup_periods"].get(per)
+            if days:
+                sched_out.append({"label": "This week" if per == cur else "Next week",
+                                  "days": _week_schedule(info["team"], sched, days, p.get("current_day"), anchor)})
+    elif anchor:
+        today = anchor[0] + (datetime.now(W.ET).date() - anchor[1]).days
+        start = today - datetime.now(W.ET).weekday()
+        for label, s0 in (("This week", start), ("Next week", start + 7)):
+            sched_out.append({"label": label,
+                              "days": _week_schedule(info["team"], sched, list(range(s0, s0 + 7)), today, anchor)})
+
+    return _json_safe({
+        "id": pid, "name": info["name"], "team": info["team"], "pos": info.get("pos", ""),
+        "injury": info.get("injury", ""), "status": info.get("status", ""),
+        "owned": float(info.get("owned", 0) or 0), "owner": owner,
+        "split": used, "cats": cats, "snapshot": snap, "windows": windows,
+        "build": build, "schedule": sched_out,
+        "espn_extras": not (lg["source"].startswith("Demo") if league else frames.keys() == {"prev"}),
+    })
+
+
+@app.get("/api/player/{pid}/espn")
+def player_espn(pid: str):
+    """Game log, career averages and news from ESPN's public APIs (best effort)."""
+    from . import playerinfo as PI
+    if not pid.isdigit():
+        raise HTTPException(400, "bad player id")
+    return _json_safe({"gamelog": PI.game_log(pid), "career": PI.career(pid), "news": PI.news(pid)})
 
 
 class StreamBody(BaseModel):
