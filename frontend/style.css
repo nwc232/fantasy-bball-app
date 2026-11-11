@@ -55,6 +55,7 @@ input[type=checkbox] { padding: 0; }
 .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 10px;
   font: inherit; font-size: 12px; cursor: pointer; color: var(--ink); }
 .chip.on { background: var(--ink); color: var(--panel); border-color: var(--ink); text-decoration: line-through; }
+#posFilter .chip.on { text-decoration: none; background: var(--accent); border-color: var(--accent); color: #fff; }
 .controls label.toggle { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 7px;
   font-size: 13px; text-transform: none; letter-spacing: 0; color: var(--ink); cursor: pointer; }
 button.small { padding: 5px 10px; font-size: 12px; margin-bottom: 4px; }

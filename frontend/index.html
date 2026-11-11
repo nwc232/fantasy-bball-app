@@ -63,10 +63,9 @@
   <section id="tab-rankings" class="tab on">
     <div class="filters">
       <input id="search" placeholder="Search players" autocomplete="off">
-      <select id="posFilter">
-        <option value="">All positions</option>
-        <option>PG</option><option>SG</option><option>SF</option><option>PF</option><option>C</option>
-      </select>
+      <div class="chips" id="posFilter" title="Pick one or more positions; none selected = all">
+        <button class="chip" data-p="PG">PG</button><button class="chip" data-p="SG">SG</button><button class="chip" data-p="SF">SF</button><button class="chip" data-p="PF">PF</button><button class="chip" data-p="C">C</button>
+      </div>
       <select id="ownerFilter"><option value="">All players</option></select>
       <label class="inline">Min GP <input id="minGp" type="number" value="0" min="0" style="width:4em"></label>
       <label class="inline"><input type="checkbox" id="showValues"> Show category values</label>

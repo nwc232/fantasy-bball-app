@@ -6,7 +6,11 @@ from datetime import date
 
 import pandas as pd
 
+import logging
+
 from . import demo, espn, weeks
+
+log = logging.getLogger("categorylab")
 
 POOL_TTL = 20 * 60
 LEAGUE_TTL = 10 * 60
@@ -137,11 +141,22 @@ class Store:
             if not parts:
                 continue
             f = pd.concat(parts, ignore_index=True)
-            f["fantasy_team"] = f["id"].map(owner).fillna(0).astype(int)
+            # Ownership from two ESPN sources: the league rosters, and each player's
+            # own onTeamId/status in the player pool. A player counts as available
+            # only if neither says he's rostered.
+            espn_team = f["fantasy_team"].fillna(0).astype(int) if "fantasy_team" in f else 0
+            f["fantasy_team"] = f["id"].map(owner).fillna(espn_team).astype(int)
             if "status" not in f:
                 f["status"] = "FREEAGENT"
-            f.loc[f["fantasy_team"] != 0, "status"] = "ONTEAM"
-            f.loc[(f["fantasy_team"] == 0) & (f["status"] == "ONTEAM"), "status"] = "FREEAGENT"
+            f["status"] = f["status"].fillna("FREEAGENT").str.upper()
+            # ESPN says rostered but we can't tell which team: keep him off the FA list
+            unknown = (f["fantasy_team"] == 0) & (f["status"] == "ONTEAM")
+            if unknown.any() and k == "season":
+                log.warning("%d player(s) marked rostered by ESPN but missing from league "
+                            "rosters, e.g. %s", int(unknown.sum()),
+                            ", ".join(f.loc[unknown, "name"].head(5)))
+            f.loc[unknown, "fantasy_team"] = -1
+            f.loc[f["fantasy_team"] > 0, "status"] = "ONTEAM"
             out[k] = f
         return _clean(out)
 

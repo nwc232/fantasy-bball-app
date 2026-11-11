@@ -135,3 +135,23 @@ def test_login_session(monkeypatch):
     good = TestClient(app)
     good.cookies.set("cl_session", r.cookies["cl_session"])
     assert good.get("/api/meta").status_code == 401
+
+
+def test_espn_rostered_player_is_never_listed_as_free_agent():
+    """Regression: a player ESPN marks as rostered but missing from the parsed
+    league rosters used to be downgraded to FREEAGENT."""
+    from app import demo as D
+    from app.store import STORE
+    key = STORE.demo_league()
+    p = STORE.leagues[key]["parsed"]
+    players = D.demo_players()
+    rostered = {r["id"] for t in p["teams"] for r in t["roster"]}
+    a, b = [x for x in players if str(x["id"]) not in rostered][:2]
+    a.update(onTeamId=3, status="ONTEAM")          # ESPN knows the team
+    b.update(onTeamId=0, status="ONTEAM")          # ESPN says rostered, team unknown
+    f = STORE._league_frames(p, players, D.YEAR)["season"].set_index("id")
+    assert f.at[str(a["id"]), "fantasy_team"] == 3
+    assert f.at[str(b["id"]), "fantasy_team"] == -1
+    avail = f[f["fantasy_team"] == 0]
+    assert str(a["id"]) not in avail.index and str(b["id"]) not in avail.index
+    assert set(avail["status"]) <= {"FREEAGENT", "WAIVERS"}

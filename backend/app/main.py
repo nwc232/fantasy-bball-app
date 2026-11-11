@@ -181,7 +181,10 @@ def _player_json(df: pd.DataFrame, cats: list[str], team_names: dict | None = No
         if team_names is not None:
             ft_id = int(d.get("fantasy_team", 0) or 0)
             row["fantasy_team"] = ft_id
-            row["fantasy_team_name"] = team_names.get(ft_id, "FA")
+            row["fantasy_team_name"] = team_names.get(
+                ft_id, "Rostered (team unknown)" if ft_id < 0 else
+                "Waivers" if str(d.get("status", "")).upper() == "WAIVERS" else "FA")
+            row["status"] = str(d.get("status", "") or "").upper()
         if "slot" in d:
             row["slot"] = d["slot"]
         row["no_stats"] = int(d["g"]) == 0

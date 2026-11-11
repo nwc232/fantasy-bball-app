@@ -129,8 +129,15 @@ async function init() {
     $("#advBtn").textContent = open ? "Model settings ▾" : "Model settings ▴";
   });
   $("#split").addEventListener("change", () => { store.set("split", $("#split").value); refreshAll(); });
-  ["#search", "#posFilter", "#ownerFilter", "#minGp", "#showValues"].forEach((s) =>
+  ["#search", "#ownerFilter", "#minGp", "#showValues"].forEach((s) =>
     $(s).addEventListener("input", () => { S.show = 200; renderRankings(); }));
+  S.pos = new Set();
+  $$("#posFilter .chip").forEach((b) => b.addEventListener("click", () => {
+    const v = b.dataset.p;
+    S.pos.has(v) ? S.pos.delete(v) : S.pos.add(v);
+    b.classList.toggle("on", S.pos.has(v));
+    S.show = 200; renderRankings();
+  }));
   $("#minGp").addEventListener("input", () => { S.minGpTouched = true; });
   ["#teams", "#roster"].forEach((s) => $(s).addEventListener("change", loadRankings));
 
@@ -294,14 +301,17 @@ function renderRankings() {
   const withOwner = !!S.leagueKey;
   const cols = rankColumns(cats, withOwner, false);
   const q = $("#search").value.trim().toLowerCase();
-  const pos = $("#posFilter").value;
+  const pos = S.pos || new Set();
   const own = $("#ownerFilter").value;
   const minGp = +$("#minGp").value || 0;
   let rows = S.rank.players.filter((p) =>
     (!q || p.name.toLowerCase().includes(q)) &&
-    (!pos || (p.pos || "").split("/").includes(pos)) &&
+    (!pos.size || (p.pos || "").split("/").some((x) => pos.has(x))) &&
     p.g >= minGp &&
-    (!own || (own === "fa" ? p.fantasy_team === 0 : String(p.fantasy_team) === own)));
+    (!own || (own === "avail" ? p.fantasy_team === 0
+      : own === "fa" ? p.fantasy_team === 0 && p.status !== "WAIVERS"
+      : own === "waivers" ? p.fantasy_team === 0 && p.status === "WAIVERS"
+      : String(p.fantasy_team) === own)));
   const col = cols.find((c) => c.k === S.sort.key) || cols.find((c) => c.k === "value");
   rows.sort((a, b) => {
     const x = col.f(a), y = col.f(b);
@@ -414,7 +424,7 @@ async function loadLeague(first) {
   $("#myTeam").innerHTML = L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   $("#myTeam").value = S.myTeam;
   $("#teamWrap").classList.remove("hidden");
-  $("#ownerFilter").innerHTML = `<option value="">All players</option><option value="fa">Free agents</option>` +
+  $("#ownerFilter").innerHTML = `<option value="">All players</option><option value="avail">Available (FA + waivers)</option><option value="fa">Free agents only</option><option value="waivers">On waivers</option>` +
     L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
   $("#period").innerHTML = L.periods.map((n) => `<option value="${n}">Week ${n}${n === L.current_period ? " (current)" : ""}</option>`).join("");
   if (!S.stream) {
