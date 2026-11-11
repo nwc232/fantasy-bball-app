@@ -15,8 +15,8 @@ Live 9-cat fantasy basketball rankings with punts, plus ESPN league import, H2H 
   - his recent game log, ESPN news and career averages by season, loaded from ESPN's public site API. These are best effort: if ESPN changes a format, only that section says it's unavailable.
 
   A link at the bottom opens the ranking-system comparison.
-- **Pickups**: free agents and waiver players ranked for your team's build (the recommended one, or any build you pick). It shows each player's normal rank, his trend over the last 15 days, games left this week and over the next 7 days, % rostered, and ▲ for players who'd be an upgrade on your weakest-fitting player. You can filter by position, waivers vs free agents, and upgrades only.
 - **Refresh**: the ↻ button re-pulls ESPN stats and your league rosters. The page also refreshes on its own every 10 minutes while it's open, and the server re-pulls a league once its data is over 10 minutes old.
+- **Free agents and waivers**: with a league loaded, Rankings' player filter has "Available (FA + waivers)", "Free agents only" and "On waivers", based on live ESPN ownership. Available players are tagged FA or waivers. Switch the table from **Stats** to **Schedule** to see each player's games this week day by day, games left this week and next week (all sortable), plus coloured chips for what he's good and bad at.
 - **League**: import an ESPN league (public, or private with your cookies). Shows each team's projected weekly category totals, category ranks, and all-play win % against every other team.
 - **Matchups**: win probability for every matchup in a given week, plus odds per category. Games are counted from the real NBA schedule and capped at your daily starting slots.
 - **Streaming**: plans this week's add/drops against your actual opponent. It counts:

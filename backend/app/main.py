@@ -219,11 +219,13 @@ def rankings(year: int = 0, split: str = "season", system: str = E.DEFAULT_SYSTE
     year = year or current_year()
     team_names = None
     cats = E.CATS
+    parsed, sched = None, None
     if league:
         lg = STORE.league(league)
         if not lg:
             raise HTTPException(404, "League not loaded; import it again.")
         frames, source = lg["frames"], lg["source"]
+        parsed, sched = lg["parsed"], lg["sched"]
         cats = lg["parsed"]["cats"]
         teams = len(lg["parsed"]["teams"])
         roster = lg["parsed"]["roster_size"]
@@ -237,7 +239,10 @@ def rankings(year: int = 0, split: str = "season", system: str = E.DEFAULT_SYSTE
     valued["rank_z"] = E.score(df, "z", cats=use, pool_size=teams * roster)["value"] \
         .rank(ascending=False, method="min").astype(int)
     valued = valued.sort_values("value", ascending=False)
+    if sched is None:
+        sched = STORE.schedule(year)
     return {"source": source, "split": used, "available_splits": list(frames),
+            "schedule": _schedule_block(parsed, sched),
             "cats": cats, "punts": punts, "system": sy.key, "spec": sy.spec(),
             "minus_one": sy.minus_one,
             "players": _player_json(valued, cats, team_names)}
@@ -440,25 +445,6 @@ def team_build(key: str, team_id: int, split: str = "season", system: str = E.DE
     return _json_safe(res)
 
 
-@app.get("/api/league/{key}/pickups")
-def team_pickups(key: str, team_id: int, split: str = "season", system: str = E.DEFAULT_SYSTEM,
-                 build: str | None = None, m1: int | None = None, ref: str | None = None,
-                 center: str | None = None, transform: int | None = None,
-                 weights: str | None = None, tov: float | None = None):
-    """Free agents and waiver players ranked for this team's build."""
-    sy = _system(system, ref, center, transform, weights, tov, m1)
-    lg = STORE.league(key)
-    if not lg:
-        raise HTTPException(404, "League not loaded; import it again.")
-    p = lg["parsed"]
-    if team_id not in {t["id"] for t in p["teams"]}:
-        raise HTTPException(404, "No such team in this league.")
-    used, _ = _pick_split(lg["frames"], split)
-    punts = None if build is None else ([] if build in ("", "none") else
-                                        [c for c in build.split(",") if c in p["cats"]])
-    return _json_safe(BUILD.pickups(p, lg["frames"], used, sy, team_id, lg["sched"], punts))
-
-
 # --------------------------------------------------------------------------- #
 # Player card
 # --------------------------------------------------------------------------- #
@@ -472,6 +458,41 @@ def _per_game(r) -> dict:
             "fg": round(float(r["fgm"]) / fga, 3) if fga else None,
             "ft": round(float(r["ftm"]) / fta, 3) if fta else None,
             "fga": round(fga, 1), "fta": round(fta, 1)}
+
+
+def _two_weeks(p: dict | None, sched: dict) -> tuple[list[tuple[str, list[int]]], int | None, object]:
+    """[(label, day ids)] for this matchup week and next, plus today's day id and the
+    calendar anchor. With a league: its matchup weeks. Without: Monday-Sunday weeks."""
+    from datetime import datetime
+    from . import weeks as W
+    anchor = (p or {}).get("anchor") or W.anchor_from_schedule(sched)
+    if p:
+        cur = p["current_period"]
+        out = [(lbl, p["matchup_periods"].get(per)) for lbl, per in (("This week", cur), ("Next week", cur + 1))]
+        return [(l, d) for l, d in out if d], p.get("current_day"), anchor
+    if not anchor:
+        return [], None, None
+    today = anchor[0] + (datetime.now(W.ET).date() - anchor[1]).days
+    start = today - datetime.now(W.ET).weekday()
+    return [("This week", list(range(start, start + 7))),
+            ("Next week", list(range(start + 7, start + 14)))], today, anchor
+
+
+def _schedule_block(p: dict | None, sched: dict) -> dict | None:
+    """Days of this week and next, and which of them each NBA team plays."""
+    weeks_, today, anchor = _two_weeks(p, sched)
+    if not weeks_ or not sched:
+        return None
+    from . import weeks as W
+    out = {"weeks": [], "teams": {}}
+    for label, days in weeks_:
+        out["weeks"].append({"label": label, "days": [
+            {**W.label(d, anchor, i), "today": d == today, "past": today is not None and d < today,
+             "nba_games": sum(1 for t in sched.values() if d in t) // 2} for i, d in enumerate(days)]})
+    for team, games in sched.items():
+        out["teams"][team] = {key: [d in games for d in days]
+                              for key, (_, days) in zip(("this", "next"), weeks_)}
+    return out
 
 
 def _week_schedule(team: str, sched: dict, days: list[int], today: int | None, anchor) -> list[dict]:
@@ -549,21 +570,9 @@ def player_card(pid: str, year: int = 0, split: str = "season", system: str = E.
                          "std_rank": int(pv.at[pid, "rank"]), "team": res["team"]["name"]}
 
     # this week and next
-    anchor = (p or {}).get("anchor") or W.anchor_from_schedule(sched)
-    sched_out = []
-    if p:
-        cur = p["current_period"]
-        for per in (cur, cur + 1):
-            days = p["matchup_periods"].get(per)
-            if days:
-                sched_out.append({"label": "This week" if per == cur else "Next week",
-                                  "days": _week_schedule(info["team"], sched, days, p.get("current_day"), anchor)})
-    elif anchor:
-        today = anchor[0] + (datetime.now(W.ET).date() - anchor[1]).days
-        start = today - datetime.now(W.ET).weekday()
-        for label, s0 in (("This week", start), ("Next week", start + 7)):
-            sched_out.append({"label": label,
-                              "days": _week_schedule(info["team"], sched, list(range(s0, s0 + 7)), today, anchor)})
+    weeks_, today, anchor = _two_weeks(p, sched)
+    sched_out = [{"label": lbl, "days": _week_schedule(info["team"], sched, days, today, anchor)}
+                 for lbl, days in weeks_]
 
     return _json_safe({
         "id": pid, "name": info["name"], "team": info["team"], "pos": info.get("pos", ""),

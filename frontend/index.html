@@ -19,7 +19,6 @@
     <button data-tab="rankings" class="on">Rankings</button>
     <button data-tab="league">League</button>
     <button data-tab="build">Team build</button>
-    <button data-tab="pickups">Pickups</button>
     <button data-tab="matchups">Matchups</button>
     <button data-tab="stream">Streaming</button>
     <button data-tab="trade">Trade analyzer</button>
@@ -69,7 +68,9 @@
       </div>
       <select id="ownerFilter"><option value="">All players</option></select>
       <label class="inline">Min GP <input id="minGp" type="number" value="0" min="0" style="width:4em"></label>
-      <label class="inline"><input type="checkbox" id="showValues"> Show category values</label>
+      <span class="seg" id="viewMode" title="Schedule shows each player's games this week and next">
+        <button data-v="stats" class="on">Stats</button><button data-v="schedule">Schedule</button></span>
+      <label class="inline" id="showValuesWrap"><input type="checkbox" id="showValues"> Show category values</label>
       <span class="spacer"></span>
       <label class="inline" id="leagueSizeWrap">Teams <input id="teams" type="number" value="12" min="4" max="20" style="width:3.5em">
         × <input id="roster" type="number" value="13" min="8" max="20" style="width:3.5em"></label>
@@ -125,24 +126,6 @@
   <section id="tab-build" class="tab">
     <div class="needs-league">Import a league (or the demo) on the League tab first.</div>
     <div class="league-only hidden"><div id="bOut"><p class="meta">Loading…</p></div></div>
-  </section>
-
-  <!-- PICKUPS -->
-  <section id="tab-pickups" class="tab">
-    <div class="needs-league">Import a league (or the demo) on the League tab first.</div>
-    <div class="league-only hidden">
-      <div class="filters">
-        <label class="inline">Build <select id="pkBuild"></select></label>
-        <select id="pkAvail">
-          <option value="avail">Free agents + waivers</option>
-          <option value="fa">Free agents only</option>
-          <option value="waivers">Waivers only</option>
-        </select>
-        <div class="chips" id="pkPos"><button class="chip" data-p="PG">PG</button><button class="chip" data-p="SG">SG</button><button class="chip" data-p="SF">SF</button><button class="chip" data-p="PF">PF</button><button class="chip" data-p="C">C</button></div>
-        <label class="inline"><input type="checkbox" id="pkUpg"> Upgrades only</label>
-      </div>
-      <div id="pkOut"><p class="meta">Loading…</p></div>
-    </div>
   </section>
 
   <!-- MATCHUPS -->

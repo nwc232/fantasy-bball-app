@@ -63,7 +63,7 @@ def test_failures_are_contained(monkeypatch):
     assert c.get("/api/player/abc/espn").status_code == 400
 
 
-def test_player_card_and_pickups_endpoints():
+def test_player_card_and_rankings_schedule():
     c = TestClient(app)
     key = c.post("/api/league/demo").json()["key"]
     j = c.get(f"/api/league/{key}").json()
@@ -71,7 +71,11 @@ def test_player_card_and_pickups_endpoints():
     card = c.get(f"/api/player/{pid}?league={key}&team_id=1").json()
     assert card["owner"] == j["teams"][0]["name"] and card["windows"] and card["snapshot"]["rank"] >= 1
     assert len(card["schedule"]) == 2 and len(card["schedule"][0]["days"]) == 7
-    pk = c.get(f"/api/league/{key}/pickups?team_id=2").json()
-    assert pk["players"] and all(p["status"] in ("FREEAGENT", "WAIVERS") for p in pk["players"])
-    ranks = [p["build_rank"] for p in pk["players"]]
-    assert ranks == sorted(ranks)
+    r = c.get(f"/api/rankings?league={key}").json()
+    sc = r["schedule"]
+    assert [w["label"] for w in sc["weeks"]] == ["This week", "Next week"]
+    assert len(sc["weeks"][0]["days"]) == 7 and any(d["today"] for d in sc["weeks"][0]["days"])
+    team = card["team"]
+    assert [d["game"] for d in card["schedule"][0]["days"]] == sc["teams"][team]["this"]   # card and rankings agree
+    avail = [p for p in r["players"] if p["fantasy_team"] == 0]
+    assert avail and {p["status"] for p in avail} <= {"FREEAGENT", "WAIVERS"}
