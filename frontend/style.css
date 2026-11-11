@@ -166,6 +166,13 @@ button.ghost { background: var(--panel); border: 1px solid var(--line); color: v
 .schip.punted { opacity: .35; }
 .grid th { line-height: 1.2; }
 
+.catstrip { display: grid; gap: 3px; min-width: 300px; }
+.catstrip span { text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .02em; padding: 6px 0;
+  border-radius: 5px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.catstrip span.punted { opacity: .3; }
+.grid td.strip-cell { width: 42%; padding-top: 4px; padding-bottom: 4px; }
+.pc-snap .catstrip { margin-top: 6px; }
+
 /* player card */
 .pc-head { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-right: 40px; }
 .pc-head h2 { margin: 0; }

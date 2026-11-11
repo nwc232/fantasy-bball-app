@@ -69,6 +69,11 @@ function params() {
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== "" && v != null)).toString();
 
 /* ---------- formatting ---------- */
+// One row of equal-width coloured cells, one per category: green = good, red = bad.
+function catStrip(v, cats, punts = S.punts) {
+  return `<div class="catstrip" style="grid-template-columns:repeat(${cats.length},1fr)">${cats.map((c) =>
+    `<span class="${punts && punts.has && punts.has(c) ? "punted" : ""}" style="${heat(v[c])}" title="${LABEL[c]}: ${v[c] > 0 ? "+" : ""}${Number(v[c]).toFixed(2)}">${LABEL[c]}</span>`).join("")}</div>`;
+}
 function heat(v) {
   if (v == null || isNaN(v)) return "";
   const a = Math.min(Math.abs(v) / 2.5, 1) * 0.42;
@@ -105,7 +110,8 @@ async function init() {
   $("#o_weights").innerHTML = Object.entries(O.weights).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   $("#o_tov").innerHTML = Object.entries(O.tov).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
   // prefs v2: default moved to DURANT H2H, so reset any older saved system once
-  if (store.get("prefsVersion", 1) < 2) { store.del("system"); store.del("spec"); store.set("prefsVersion", 2); }
+  // prefs v3: only DURANT H2H (default) and Standard 9-cat are offered; reset older saved choices once
+  if (store.get("prefsVersion", 1) < 3) { store.del("system"); store.del("spec"); store.set("prefsVersion", 3); }
   S.base = store.get("system", S.meta.default_system);
   if (!S.meta.systems.find((s) => s.key === S.base)) S.base = S.meta.default_system;
   writeSpec(store.get("spec", S.meta.systems.find((s) => s.key === S.base).spec));
@@ -322,7 +328,7 @@ function playerRowHTML(p, cols, cats) {
       return `<td class="${d.today ? "today-col" : ""}">${c.f(p) ? `<span class="cell ${d.past ? "past" : "start"}"></span>` : ""}</td>`;
     }
     if (c.k === "left" || c.k === "next") return `<td><b>${c.f(p)}</b></td>`;
-    if (c.k === "chips") return `<td class="l">${cats.map((x) => `<span class="schip ${S.punts.has(x) ? "punted" : ""}" style="${heat(p.v[x])}">${LABEL[x]}</span>`).join("")}</td>`;
+    if (c.k === "chips") return `<td class="l strip-cell">${catStrip(p.v, cats)}</td>`;
     if (c.k === "dropped") return `<td class="dropped">${esc(p.dropped)}</td>`;
     if (c.k === "slot") return `<td class="l meta">${c.f(p)}</td>`;
     return `<td>${c.f(p)}</td>`;
@@ -378,7 +384,7 @@ function bindExplain(table) {
 function closeExplain() { $("#explain").classList.add("hidden"); $("#explain").classList.remove("wide-drawer"); }
 
 /* ---------- player card ---------- */
-const WINDOW_COLS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "fg", "ft", "tov"];
+const WINDOW_COLS = ["fg", "ft", "fg3m", "pts", "reb", "ast", "stl", "blk", "tov"];
 async function openPlayer(pid) {
   $("#explain").classList.remove("hidden");
   $("#explain").classList.add("wide-drawer");
@@ -407,7 +413,7 @@ async function openPlayer(pid) {
     ${sn ? `<div class="pc-snap">
       <div class="big">#${sn.rank}</div>
       <div><b>${esc(sysLabel)}</b> rank · value ${sn.value.toFixed(2)} <span class="meta">(${esc(S.meta.splits[d.split] || d.split)} stats${sn.dropped ? ` · Minus 1 drops ${sn.dropped}` : ""})</span><br>
-        ${d.cats.map((c) => `<span class="schip" style="${heat(sn.v[c])}" title="${sn.v[c]}">${LABEL[c]}</span>`).join("")}</div>
+        ${catStrip(sn.v, d.cats)}</div>
     </div>` : `<p class="meta">No stats in the selected window.</p>`}
     ${d.build ? `<div class="callout">For ${esc(d.build.team)}'s build (${d.build.punts.length ? "punt " + d.build.punts.map((c) => LABEL[c]).join(" + ") : "no punts"}):
       <b>#${d.build.build_rank}</b> vs #${d.build.std_rank} normally
@@ -462,7 +468,7 @@ async function loadEspnExtras(pid) {
 }
 async function openExplain(pid, target) {
   const curKey = $("#system").value;
-  target = target || (curKey === S.meta.default_system ? "tz" : S.meta.default_system);
+  target = target || (curKey === S.meta.default_system ? "z" : S.meta.default_system);
   $("#explain").classList.remove("hidden");
   $("#exBody").innerHTML = `<p class="meta">Re-ranking the player pool under each setting…</p>`;
   const p = { ...params(), player: pid, target, teams: $("#teams").value, roster: $("#roster").value, league: S.leagueKey };
@@ -661,8 +667,7 @@ function renderBuild() {
   };
   const tagCls = { core: "up", fits: "meta", "doesn't fit": "down", "no stats": "meta" };
   const rk = (n) => n == null ? "–" : `#${n}`;
-  const statChips = (v) => B.cats.filter((c) => !cur.punts.includes(c))
-    .map((c) => `<span class="schip" style="${heat(v[c])}">${LABEL[c]}</span>`).join("");
+  const statChips = (v) => catStrip(v, B.cats.filter((c) => !cur.punts.includes(c)), new Set());
   const misfits = B.players.filter((m) => m.label === "doesn't fit");
 
   $("#bOut").innerHTML = `
@@ -952,21 +957,17 @@ function renderTrade(r) {
 /* ---------- method ---------- */
 function renderMethod() {
   $("#methodText").innerHTML = `
-  <h2>How a ranking is built</h2>
-  <p>Each player's per-game line becomes one number per category, and the categories are averaged. Every system is a preset of the switches under <b>Model settings</b>. The default is DURANT H2H.</p>
+  <h2>The two ranking systems</h2>
   <ul>
-    <li><b>Scale against</b> sets the spread that converts each category into a common unit. <i>Rostered players</i> uses the top teams × roster. <i>Rostered + waiver pool</i> uses 1.5× that. <i>Whole NBA</i> (DURANT) uses every eligible player.</li>
-    <li><b>Zero point</b> sets what counts as 0: the pool average, or the waiver tier (so values read "better than a pickup"). It doesn't change a straight ranking, but it changes which category Minus 1 drops.</li>
-    <li><b>Transform</b> applies DURANT's Yeo-Johnson step, which compresses extreme tails such as 3+ blocks a game.</li>
-    <li><b>Weights</b>: <i>Equal</i>, <i>DURANT H2H</i> (PTS 1, REB .94, AST .75, rest .6), or <i>by weekly noise</i> (G-score, which shrinks volatile categories like steals and FT%).</li>
-    <li><b>Turnovers</b> count at full weight, half weight (DURANT), or not at all (DURANT H2H).</li>
-    <li><b>Minus 1</b> drops each player's weakest category. Use it when building around a player with one glaring hole, like Giannis' FT%. The Dropped column shows what was removed.</li>
+    <li><b>DURANT H2H (Josh Lloyd)</b>, the default. Each category goes through a Yeo-Johnson transform, which compresses extreme outliers, then is measured against the whole NBA, not just rostered players. Weights: PTS 1.00, REB 0.94, AST 0.75, and 0.60 for FG%, FT%, 3PM, STL and BLK. Turnovers are excluded, and each player's weakest category is dropped (Minus 1). Josh hasn't published every detail, so these parts are educated guesses: FG% and FT% use the standard volume-weighted impact; "the whole NBA" means players with at least 25% of the most games played and 10+ minutes a game; and Minus 1 drops the lowest category after weighting.</li>
+    <li><b>Standard 9-cat</b>: z-scores against the top <i>teams × roster</i> players, all nine categories weighted equally. This is what Yahoo, ESPN and Basketball Monster show by default, and it reproduces Basketball Monster's published values.</li>
   </ul>
+  <p><b>Minus 1</b> can be toggled on either system. <b>Model settings</b> lets you try other combinations (reference pool, transform, weights, turnover weight); any change makes a "Custom" system.</p>
   <p><b>Eligibility</b> scales with the season. To set the scale or fit the transform, a player needs 25% of the most games anyone has played (2 games in the first week, about 21 by season's end) and 10+ minutes a game. The Min GP filter on the rankings page uses the same 25% rule.</p>
   <p><b>Punting</b> removes a category from player values. Matchup and trade odds still score every category, because your opponents still win them.</p>
 
   <h2>What the draft simulations say</h2>
-  <p>The 2025-26 season was replayed for each system: 1,000 snake drafts of 12 teams × 13 rounds, then every week played from real box scores (all-play, 9-cat H2H). Eleven opponents draft off standard Z with some randomness; one test team uses the system being tested. <i>Perfect info</i> values players on the full season. <i>Real-world</i> values them on Oct–Dec and plays Jan–Apr. Numbers are the test team's matchup win %.</p>
+  <p>Background study (other systems tested here aren't offered in the app right now). The 2025-26 season was replayed for each system: 1,000 snake drafts of 12 teams × 13 rounds, then every week played from real box scores (all-play, 9-cat H2H). Eleven opponents draft off standard Z with some randomness; one test team uses the system being tested. <i>Perfect info</i> values players on the full season. <i>Real-world</i> values them on Oct–Dec and plays Jan–Apr. Numbers are the test team's matchup win %.</p>
   <table>
     <tr><th>Settings</th><th>Perfect info</th><th>Real-world</th></tr>
     <tr><td>Standard Z (rostered)</td><td>56.8</td><td>57.2</td></tr>

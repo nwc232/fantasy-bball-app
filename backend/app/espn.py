@@ -252,7 +252,7 @@ def parse_league(data: dict, year: int) -> dict:
             cats.append(SCORING_CAT[sid])
         else:
             unsupported.append(SCORING_NAMES.get(sid, f"stat {sid}"))
-    order = ["pts", "fg3m", "reb", "ast", "stl", "blk", "fg", "ft", "tov"]
+    order = ["fg", "ft", "fg3m", "pts", "reb", "ast", "stl", "blk", "tov"]
     cats = [c for c in order if c in cats] or order
 
     slot_counts = {int(k): v for k, v in

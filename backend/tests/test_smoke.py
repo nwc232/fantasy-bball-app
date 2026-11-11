@@ -77,7 +77,7 @@ def test_explain_and_refresh():
     e = c.get(f"/api/explain?player={pid}&split=prev&system=tz&target=durant_h2h").json()
     assert e["current"]["rank"] == 41 or e["current"]["rank"] <= 41
     assert e["path"][-1]["rank"] == e["target"]["rank"]
-    assert {p["key"] for p in e["presets"]} == {"tz", "z", "g", "durant", "durant_h2h"}
+    assert {p["key"] for p in e["presets"]} == {"z", "durant_h2h"}
     key = c.post("/api/league/demo").json()["key"]
     assert "updated" in c.post(f"/api/league/{key}/refresh").json()
 
@@ -155,3 +155,11 @@ def test_espn_rostered_player_is_never_listed_as_free_agent():
     avail = f[f["fantasy_team"] == 0]
     assert str(a["id"]) not in avail.index and str(b["id"]) not in avail.index
     assert set(avail["status"]) <= {"FREEAGENT", "WAIVERS"}
+
+
+def test_only_two_systems_offered_and_cat_order():
+    m = c.get("/api/meta").json()
+    assert [s["key"] for s in m["systems"]] == ["durant_h2h", "z"]
+    assert m["default_system"] == "durant_h2h"
+    j = c.get("/api/rankings?split=prev").json()
+    assert j["cats"] == ["fg", "ft", "fg3m", "pts", "reb", "ast", "stl", "blk", "tov"]

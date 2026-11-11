@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import PowerTransformer
 
-CATS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "fg", "ft", "tov"]
+CATS = ["fg", "ft", "fg3m", "pts", "reb", "ast", "stl", "blk", "tov"]   # display order used across the app
 LABELS = {"pts": "PTS", "fg3m": "3PM", "reb": "REB", "ast": "AST", "stl": "STL",
           "blk": "BLK", "fg": "FG%", "ft": "FT%", "tov": "TO"}
 COUNT_STATS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov",
@@ -80,15 +80,15 @@ class System:
                 "center": self.center}
 
 
-SYSTEMS = {
-    "durant_h2h": System("durant_h2h", "DURANT H2H", reference="nba", transform=True,
+ALL_SYSTEMS = {
+    "durant_h2h": System("durant_h2h", "DURANT H2H (Josh Lloyd)", reference="nba", transform=True,
                          weights="durant_h2h", tov=0.0, minus_one=True,
                          blurb="Josh Lloyd: transform vs the whole NBA, H2H weights, no TO, "
                                "worst category dropped."),
     "tz": System("tz", "Category Lab", transform=True, tov=0.5,
                  blurb="DURANT's transform and half-weight turnovers, scaled against rostered "
                        "players, equal weights, no Minus 1. Did best in the 2025-26 draft simulations."),
-    "z": System("z", "Standard 9-cat (Z)",
+    "z": System("z", "Standard 9-cat",
                 blurb="Z-score vs the top rostered players, averaged. What Yahoo/ESPN/BBM show."),
     "g": System("g", "G-score (H2H)", weights="variance",
                 blurb="Z-score with each category shrunk by how noisy it is week to week."),
@@ -98,11 +98,16 @@ SYSTEMS = {
                            "worst category dropped."),
 }
 
+# The presets offered in the app. The rest stay available to the API and the
+# analysis scripts (and can be shown again by listing them here).
+SHOWN = ["durant_h2h", "z"]
+SYSTEMS = {k: ALL_SYSTEMS[k] for k in SHOWN}
+
 DEFAULT_SYSTEM = "durant_h2h"
 
 
 def make_system(base: str | System = "durant_h2h", **overrides) -> System:
-    sy = SYSTEMS[base] if isinstance(base, str) else base
+    sy = ALL_SYSTEMS[base] if isinstance(base, str) else base
     ov = {k: v for k, v in overrides.items() if v is not None}
     if not ov:
         return sy
@@ -175,7 +180,7 @@ def score(df: pd.DataFrame, system: System | str, cats: list[str] | None = None,
     """Per-category values (v_<cat>), overall `value`, and `dropped`.
     minus_one: None = the system's setting, True/False = force."""
     if isinstance(system, str):
-        system = SYSTEMS[system]
+        system = ALL_SYSTEMS[system]
     cats = list(cats or CATS)
     w = category_weights(system, cats)
     used = list(w.index)

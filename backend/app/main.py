@@ -131,12 +131,12 @@ def _json_safe(o):
     return o
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "..", "frontend")
 
-STAT_COLS = ["pts", "fg3m", "reb", "ast", "stl", "blk", "tov"]
+STAT_COLS = ["fg3m", "pts", "reb", "ast", "stl", "blk", "tov"]
 
 
 def _system(system: str, ref=None, center=None, transform=None, weights=None, tov=None,
             m1=None) -> E.System:
-    if system not in E.SYSTEMS:
+    if system not in E.ALL_SYSTEMS:
         raise HTTPException(400, "unknown system")
     if ref is not None and ref not in E.REFERENCES:
         raise HTTPException(400, "unknown ref")
@@ -362,9 +362,9 @@ def explain(player: str, target: str = "durant_h2h", year: int = 0, split: str =
             center: str | None = None, transform: int | None = None,
             weights: str | None = None, tov: float | None = None):
     cur = _system(system, ref, center, transform, weights, tov, m1)
-    if target not in E.SYSTEMS:
+    if target not in E.ALL_SYSTEMS:
         raise HTTPException(400, "unknown target")
-    tgt = E.SYSTEMS[target]
+    tgt = E.ALL_SYSTEMS[target]
     year = year or current_year()
     cats = E.CATS
     if league:
