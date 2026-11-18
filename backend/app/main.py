@@ -635,6 +635,8 @@ class TradeBody(BaseModel):
     b_gives: list[str] = []
     a_drops: list[str] = []
     b_drops: list[str] = []
+    a_adds: list[str] = []       # free agents the user picked to fill open spots
+    b_adds: list[str] = []
     split: str = "season"
     system: str = E.DEFAULT_SYSTEM
     punt: str = ""
@@ -653,7 +655,8 @@ def trade(key: str, body: TradeBody):
     if not body.a_gives and not body.b_gives:
         raise HTTPException(400, "Pick at least one player to move.")
     rep = L.trade_report(p, pool, p["cats"], body.team_a, body.team_b, body.a_gives,
-                         body.b_gives, body.a_drops, body.b_drops, fill=body.fill)
+                         body.b_gives, body.a_drops, body.b_drops, fill=body.fill,
+                         a_adds=body.a_adds, b_adds=body.b_adds)
     rep["cats"] = p["cats"]
     rep["punts"] = punts
     return rep

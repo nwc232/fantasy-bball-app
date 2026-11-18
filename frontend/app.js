@@ -14,7 +14,7 @@ const S = {
   punts: new Set(store.get("punts", [])),
   myTeam: store.get("myTeam", null),
   selTeam: null,
-  trade: { a: null, b: null, aGive: new Set(), bGive: new Set(), aDrop: new Set(), bDrop: new Set() },
+  trade: { a: null, b: null, aGive: new Set(), bGive: new Set(), aDrop: new Set(), bDrop: new Set(), aAdd: [], bAdd: [] },
 };
 const LABEL = { pts: "PTS", fg3m: "3PM", reb: "REB", ast: "AST", stl: "STL", blk: "BLK", fg: "FG%", ft: "FT%", tov: "TO" };
 
@@ -67,6 +67,14 @@ function params() {
   };
 }
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== "" && v != null)).toString();
+
+/* ---------- sticky header offset ---------- */
+(() => {
+  const top = document.querySelector("header.top");
+  if (!top) return;
+  const set = () => document.documentElement.style.setProperty("--hdr", `${top.offsetHeight}px`);
+  set(); if (window.ResizeObserver) new ResizeObserver(set).observe(top); window.addEventListener("resize", set);
+})();
 
 /* ---------- formatting ---------- */
 // One row of equal-width coloured cells, one per category: green = good, red = bad.
@@ -298,7 +306,6 @@ function rankColumns(cats, withOwner, withSlot) {
   cats.forEach((c) => cols.push({ k: "c_" + c, t: LABEL[c], cat: c, f: (p) => $("#showValues").checked ? p.v[c] : (c === "fg" || c === "ft" ? p.v[c] : p.stats[c]) }));
   cols.push({ k: "value", t: "Value", f: (p) => p.value });
 
-  if (dur) cols.push({ k: "dropped", t: "Dropped", f: (p) => p.dropped || "" });
   return cols;
 }
 
@@ -329,7 +336,6 @@ function playerRowHTML(p, cols, cats) {
     }
     if (c.k === "left" || c.k === "next") return `<td><b>${c.f(p)}</b></td>`;
     if (c.k === "chips") return `<td class="l strip-cell">${catStrip(p.v, cats)}</td>`;
-    if (c.k === "dropped") return `<td class="dropped">${esc(p.dropped)}</td>`;
     if (c.k === "slot") return `<td class="l meta">${c.f(p)}</td>`;
     return `<td>${c.f(p)}</td>`;
   }).join("");
@@ -837,7 +843,7 @@ function renderStream() {
 }
 
 /* ---------- trade ---------- */
-function resetSel() { ["aGive", "bGive", "aDrop", "bDrop"].forEach((k) => S.trade[k].clear()); }
+function resetSel() { ["aGive", "bGive", "aDrop", "bDrop"].forEach((k) => S.trade[k].clear()); S.trade.aAdd = []; S.trade.bAdd = []; }
 function setupTrade(reset) {
   const L = S.league;
   const opts = L.teams.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
@@ -869,6 +875,7 @@ function renderTradeLists() {
       row.addEventListener("click", (ev) => {
         if (ev.target.classList.contains("x")) { drop.has(id) ? drop.delete(id) : (drop.add(id), give.delete(id)); }
         else { give.has(id) ? give.delete(id) : (give.add(id), drop.delete(id)); }
+        S.trade.aAdd = []; S.trade.bAdd = [];      // the trade changed, so earlier pickup choices no longer apply
         renderTradeLists();
       });
     });
@@ -883,7 +890,7 @@ async function runTrade() {
   if (!T.aGive.size && !T.bGive.size) { $("#tMsg").textContent = "Tick at least one player."; return; }
   $("#tMsg").textContent = "Simulating…";
   const body = { ...params(), team_a: T.a, team_b: T.b, a_gives: [...T.aGive], b_gives: [...T.bGive],
-    a_drops: [...T.aDrop], b_drops: [...T.bDrop], fill: $("#tFill").checked };
+    a_drops: [...T.aDrop], b_drops: [...T.bDrop], a_adds: T.aAdd, b_adds: T.bAdd, fill: $("#tFill").checked };
   try {
     const r = await api(`/api/league/${encodeURIComponent(S.leagueKey)}/trade`, { method: "POST", body: JSON.stringify(body) });
     $("#tMsg").textContent = "";
@@ -901,6 +908,25 @@ function renderTrade(r) {
     ? { label: "Cats per week", get: (s) => s.exp_cats, fmt: (x) => x.toFixed(2), digits: 2 }
     : { label: "Weekly win chance", get: (s) => s.allplay, fmt: (x) => `${x.toFixed(1)}%`, digits: 1 };
   const list = (arr) => arr.map((p) => `${esc(p.name)}`).join(", ") || "–";
+  const sideKey = (s) => (s.team_id === S.trade.a ? "a" : "b");
+  // one dropdown per open roster spot: best fits for this team first, then every other free agent
+  const pickups = (s) => {
+    const spots = [...s.adds, ...s.auto_adds];
+    if (!spots.length) return "";
+    const unit = win ? " pts" : " cats";
+    const fit = s.add_options || [];
+    const fitIds = new Set(fit.map((p) => p.id));
+    const rest = (S.league.free_agents || []).filter((p) => !fitIds.has(p.id)).slice(0, 250);
+    const select = (cur, i) => {
+      const known = fitIds.has(cur.id) || rest.some((p) => p.id === cur.id);
+      return `<label><select class="pickup" data-side="${sideKey(s)}" data-i="${i}" title="Change who fills this open spot. The number is how much each player adds compared with leaving the spot empty.">
+        ${known ? "" : `<option value="${esc(cur.id)}" selected>${esc(cur.name)}</option>`}
+        <optgroup label="Best fit for ${esc(s.name)}">${fit.map((p) => `<option value="${esc(p.id)}" ${p.id === cur.id ? "selected" : ""}>${esc(p.name)} (${esc(p.team)}) · ${p.gain >= 0 ? "+" : ""}${p.gain.toFixed(win ? 1 : 2)}${unit}</option>`).join("")}</optgroup>
+        <optgroup label="Other free agents (by rank)">${rest.map((p) => `<option value="${esc(p.id)}" ${p.id === cur.id ? "selected" : ""}>${esc(p.name)} (${esc(p.team)}) · ${p.no_stats ? "no stats" : `#${p.rank}`}</option>`).join("")}</optgroup>
+      </select>${i >= s.adds.length ? `<span class="auto-tag">auto-picked: best fit</span>` : ""}</label>`;
+    };
+    return `<div class="pickups"><span class="k">Picks up</span>${spots.map(select).join("")}</div>`;
+  };
 
   const side = (s) => {
     const [b, a] = primary.get(s), d = a - b;
@@ -918,8 +944,9 @@ function renderTrade(r) {
     };
     return `<div class="card trade-card">
       <h2>${esc(s.name)}</h2>
-      <div class="swaps"><div><span class="k">Gets</span> ${list(s.gets)}${s.auto_adds.length ? ` <span class="auto">+ picks up ${list(s.auto_adds)}</span>` : ""}</div>
-        <div><span class="k">Gives</span> ${list(s.gives)}${s.drops.length ? `, drops ${list(s.drops)}` : ""}${s.auto_drops.length ? ` <span class="auto">+ drops ${list(s.auto_drops)}</span>` : ""}</div></div>
+      <div class="swaps"><div><span class="k">Gets</span> ${list(s.gets)}</div>
+        <div><span class="k">Gives</span> ${list(s.gives)}${s.drops.length ? `, drops ${list(s.drops)}` : ""}${s.auto_drops.length ? ` <span class="auto">+ drops ${list(s.auto_drops)}</span>` : ""}</div>
+        ${pickups(s)}</div>
       <div class="verdict-line ${tone}">
         <div class="big">${word}</div>
         <div><b>${primary.fmt(b)} → ${primary.fmt(a)}</b> ${primary.label.toLowerCase()}
@@ -952,6 +979,11 @@ function renderTrade(r) {
       <td>${t.rank[0]} ${t.rank[0] !== t.rank[1] ? delta(t.rank[0], t.rank[1], 0, true) : ""}</td>
       <td>${t.allplay[1].toFixed(1)}% ${delta(t.allplay[0], t.allplay[1])}</td></tr>`).join("")}
     </tbody></table></div></details>`;
+  $$("#tResult select.pickup").forEach((sel) => sel.addEventListener("change", () => {
+    const k = sel.dataset.side;
+    S.trade[k + "Add"] = $$(`#tResult select.pickup[data-side="${k}"]`).map((x) => x.value);
+    runTrade();
+  }));
 }
 
 /* ---------- method ---------- */

@@ -75,7 +75,7 @@
       <label class="inline" id="leagueSizeWrap">Teams <input id="teams" type="number" value="12" min="4" max="20" style="width:3.5em">
         × <input id="roster" type="number" value="13" min="8" max="20" style="width:3.5em"></label>
     </div>
-    <div class="table-wrap"><table id="rankTable" class="grid"></table></div>
+    <div class="table-wrap sticky-wrap"><table id="rankTable" class="grid"></table></div>
     <button id="more" class="ghost">Show more</button>
   </section>
 
@@ -178,7 +178,7 @@
         </div>
       </div>
       <div class="row center">
-        <label class="inline" title="Uneven trades: the team over the roster limit drops its lowest-valued player; the team with an open spot picks up the free agent (incl. waivers) who helps it most.">
+        <label class="inline" title="Uneven trades: the team over the roster limit drops its lowest-valued player; the team with an open spot picks up the free agent (incl. waivers) who helps it most. After analyzing, you can change who gets picked up.">
           <input type="checkbox" id="tFill" checked> Fill open spots / drop extras automatically</label>
         <button id="tRun" class="primary">Analyze trade</button>
         <button id="tClear" class="ghost">Clear</button>

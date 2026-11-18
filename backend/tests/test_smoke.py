@@ -98,6 +98,18 @@ def test_uneven_trade_is_balanced():
     off = c.post(f"/api/league/{key}/trade", json={**body, "fill": False}).json()
     assert off["sides"][0]["roster_size_after"] == sa["roster_limit"] - 1
 
+    # the open spot comes with ranked options, and the user can pick someone else
+    opts = sa["add_options"]
+    assert len(opts) >= 2 and opts[0]["id"] == sa["auto_adds"][0]["id"]
+    assert all(opts[i]["gain"] >= opts[i + 1]["gain"] for i in range(len(opts) - 1))
+    pick = opts[-1]["id"]
+    mine = c.post(f"/api/league/{key}/trade", json={**body, "a_adds": [pick]}).json()["sides"][0]
+    assert [p["id"] for p in mine["adds"]] == [pick] and mine["auto_adds"] == []
+    assert mine["roster_size_after"] == mine["roster_limit"]
+    # a rostered player can't be "picked up"
+    bad = c.post(f"/api/league/{key}/trade", json={**body, "a_adds": [b["players"][3]["id"]]}).json()["sides"][0]
+    assert bad["adds"] == [] and len(bad["auto_adds"]) == 1
+
 
 def test_empty_stat_windows_are_not_created():
     """Zero-stat rows for injured rostered players must not invent a window
