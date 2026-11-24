@@ -19,6 +19,7 @@ model as power rankings.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from itertools import combinations
 
 import numpy as np
@@ -34,7 +35,11 @@ IR_SLOT = 13
 # you currently win. Punting something you lose most weeks is nearly free.
 PUNT_BASE = 0.15
 PUNT_STRONG = 1.5            # x (weekly win chance - 35%), when above 35%
-MAX_BUILDS = 8
+MAX_BUILDS = 3
+# DURANT ignores turnovers in player rankings. For a team build that hides a real
+# weekly category, so here TO always counts (at DURANT's low-tier weight) unless
+# the build punts it.
+BUILD_TOV = 0.60
 
 
 def _combine(vals: pd.DataFrame, system: E.System, cats: list[str]) -> pd.Series:
@@ -74,6 +79,8 @@ def advise(league: dict, df: pd.DataFrame, system: E.System, team_id: int,
     n = len(cats)
     need = n // 2 + 1
     max_punts = max(0, n - need - 1)
+    if "tov" in cats and system.tov == 0:
+        system = replace(system, tov=BUILD_TOV)
     size = len(league["teams"]) * league["roster_size"]
 
     base = E.score(df, system, cats=cats, pool_size=size)        # per-category values, all cats
@@ -98,36 +105,34 @@ def advise(league: dict, df: pd.DataFrame, system: E.System, team_id: int,
         return sum(PUNT_BASE + PUNT_STRONG * max(0.0, win[c] - 0.35) for c in punts)
 
     # ---- evaluate every build -------------------------------------------- #
-    builds, seen = [], {}
-    for k in range(max_punts + 1):
-        for punts in combinations(cats, k):
-            keep = [c for c in cats if c not in punts]
-            w = E.category_weights(system, keep)
-            sig = tuple(sorted(w.index))
-            if sig in seen:            # e.g. punting TO when the system ignores TO already
-                continue
-            seen[sig] = True
-            v = _combine(vals, system, keep).to_numpy()
-            team_val = {tid: float(v[m].sum()) for tid, m in members.items()}
-            arr = np.array(list(team_val.values()))
-            sd = arr.std() or 1.0
-            z = (team_val[team_id] - arr.mean()) / sd
-            rank = int((arr > team_val[team_id]).sum() + 1)
-            builds.append({"punts": list(punts), "targets": keep, "team_rank": rank,
-                           "of": len(arr), "z": round(float(z), 2),
-                           "cost": round(punt_cost(punts), 2),
-                           "score": round(float(z) - punt_cost(punts), 3),
-                           "winning": sum(1 for c in keep if win[c] >= 0.5),
-                           "_v": v})
+    def evaluate(punts):
+        keep = [c for c in cats if c not in punts]
+        v = _combine(vals, system, keep).to_numpy()
+        team_val = {tid: float(v[m].sum()) for tid, m in members.items()}
+        arr = np.array(list(team_val.values()))
+        sd = arr.std() or 1.0
+        z = (team_val[team_id] - arr.mean()) / sd
+        rank = int((arr > team_val[team_id]).sum() + 1)
+        return {"punts": [c for c in cats if c in punts], "targets": keep, "team_rank": rank,
+                "of": len(arr), "z": round(float(z), 2),
+                "cost": round(punt_cost(punts), 2),
+                "score": round(float(z) - punt_cost(punts), 3),
+                "winning": sum(1 for c in keep if win[c] >= 0.5),
+                "_v": v}
+
+    builds = [evaluate(set(p)) for k in range(max_punts + 1) for p in combinations(cats, k)]
     builds.sort(key=lambda b: -b["score"])
+    for i, b in enumerate(builds):
+        b["place"] = i + 1                 # how this build ranks among all of them
     no_punt = next(b for b in builds if not b["punts"])
 
     if build_punts is not None:
-        chosen = next((b for b in builds if sorted(b["punts"]) == sorted(build_punts)), None)
-        if chosen is None:          # a punt the system already ignores, or >max: build it ad hoc
-            keep = [c for c in cats if c not in build_punts]
-            v = _combine(vals, system, keep).to_numpy()
-            chosen = {"punts": list(build_punts), "targets": keep, "_v": v}
+        bp = set(build_punts) & set(cats)
+        if len(bp) > n - need:
+            raise ValueError(f"Punting {len(bp)} leaves fewer than {need} categories to win.")
+        chosen = next((b for b in builds if set(b["punts"]) == bp), None)
+        if chosen is None:          # more punts than we search: evaluate it on its own
+            chosen = evaluate(bp) | {"place": None}
     else:
         chosen = builds[0]
 
@@ -188,6 +193,9 @@ def advise(league: dict, df: pd.DataFrame, system: E.System, team_id: int,
         "profile": profile,
         "winning_now": sum(1 for c in cats if win[c] >= 0.5),
         "builds": [clean(b) for b in builds[:MAX_BUILDS]],
+        "n_builds": len(builds),
+        "max_punts": n - need,
+        "tov_note": bool("tov" in cats and system.tov == BUILD_TOV),
         "no_punt": clean(no_punt),
         "build": clean(chosen) | {"recommended": chosen is builds[0]},
         "players": mine,

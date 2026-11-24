@@ -439,7 +439,10 @@ def team_build(key: str, team_id: int, split: str = "season", system: str = E.DE
     used, df = _pick_split(lg["frames"], split)
     punts = None if build is None else ([] if build in ("", "none") else
                                         [c for c in build.split(",") if c in p["cats"]])
-    res = BUILD.advise(p, df, sy, team_id, punts)
+    try:
+        res = BUILD.advise(p, df, sy, team_id, punts)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     res.pop("_pool", None); res.pop("_drops", None)
     res["split"] = used
     return _json_safe(res)

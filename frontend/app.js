@@ -661,6 +661,7 @@ async function loadBuild() {
   renderBuild();
 }
 
+const ord = (n) => `${n}${(n % 100 >= 11 && n % 100 <= 13) ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"}`;
 function renderBuild() {
   const B = S.build;
   const sysLabel = $("#system").selectedOptions[0].textContent;
@@ -669,7 +670,10 @@ function renderBuild() {
   const tile = (x) => {
     const t = x.win_pct >= 60 ? "strong" : x.win_pct >= 45 ? "swing" : "weak";
     const punted = cur.punts.includes(x.cat);
-    return `<div class="ptile ${t} ${punted ? "punted" : ""}"><div class="c">${LABEL[x.cat]}</div><div class="w">${x.win_pct.toFixed(0)}%</div><div class="r meta">${x.rank}${["st","nd","rd"][x.rank - 1] || "th"} of ${x.of}</div></div>`;
+    return `<button class="ptile ${t} ${punted ? "punted" : "kept"}" data-cat="${x.cat}" title="${punted ? "Punted: click to build for it again" : "Click to punt"}">
+      <div class="c">${LABEL[x.cat]}</div><div class="w">${x.win_pct.toFixed(0)}%</div>
+      <div class="r meta">${x.rank}${["st","nd","rd"][x.rank - 1] || "th"} of ${x.of}</div>
+      <div class="pt-state">${punted ? "Punt" : "Build"}</div></button>`;
   };
   const tagCls = { core: "up", fits: "meta", "doesn't fit": "down", "no stats": "meta" };
   const rk = (n) => n == null ? "–" : `#${n}`;
@@ -682,18 +686,26 @@ function renderBuild() {
       <div class="meta">Win ${B.need} of ${B.cats.length} categories each week. In a typical week you currently win <b>${B.winning_now}</b>. Player ranks use ${esc(sysLabel)} (${esc(S.meta.splits[B.split] || B.split)} stats).</div>
     </div></div>
 
-    <h3 style="margin-top:6px">Where your team stands <span class="hint">· chance to win each category in a typical week vs the league</span></h3>
+    <h3 style="margin-top:6px">Your build <span class="hint">· click a category to punt it or build for it again. % = chance to win it in a typical week vs the league</span></h3>
     <div class="ptiles">${B.profile.map(tile).join("")}</div>
+    <div class="build-sum">
+      <div><b>${puntName(cur.punts)}</b>
+        ${cur.recommended ? '<span class="rec">recommended</span>' : cur.place ? `<span class="meta">· ${ord(cur.place)} best of ${B.n_builds} builds</span>` : '<span class="meta">· custom</span>'}</div>
+      <div class="meta">Roster ranks <b>${ord(cur.team_rank)}</b> of ${cur.of} for this build · already winning ${cur.winning} of the ${cur.targets.length} categories you keep (need ${B.need})</div>
+      <div class="row">${cur.recommended ? "" : '<button class="ghost small" id="bRec">Back to recommended</button>'}
+        ${cur.punts.length ? '<button class="ghost small" id="bNone">No punts</button>' : ""}<span id="bMsg" class="msg"></span></div>
+    </div>
+    ${B.tov_note ? `<p class="note">DURANT H2H rankings ignore turnovers, but here TO counts like the other low-weight categories unless you punt it, so high-turnover players fit worse when you're building for TO.</p>` : ""}
 
-    <h3>Builds that suit your roster <span class="hint">· click one to analyse it</span></h3>
+    <h3>Recommended builds <span class="hint">· the ${B.builds.length} that suit your roster best. Click one to use it</span></h3>
     <div class="builds">${B.builds.map((b, i) => {
       const on = JSON.stringify([...b.punts].sort()) === JSON.stringify([...cur.punts].sort());
       return `<button class="bcard ${on ? "on" : ""}" data-punts="${b.punts.join(",")}">
         <div class="bt">${puntName(b.punts)}${i === 0 ? ' <span class="rec">recommended</span>' : ""}</div>
-        <div class="bm">Roster ranks <b>${b.team_rank}${["st","nd","rd"][b.team_rank - 1] || "th"}</b> of ${b.of} for this build</div>
+        <div class="bm">Roster ranks <b>${ord(b.team_rank)}</b> of ${b.of} for this build</div>
         <div class="meta">Already winning ${b.winning} of the ${b.targets.length} categories you'd keep</div></button>`;
     }).join("")}</div>
-    <p class="note">Each build re-values every player without the punted categories, then compares your roster with every other team's. Punting a category you currently win counts against a build; punting one you lose most weeks costs little. With no punts your roster ranks ${B.no_punt.team_rank} of ${B.no_punt.of}.</p>
+    <p class="note">Each build re-values every player without the punted categories, then compares your roster with every other team's. Punting a category you currently win counts against a build; punting one you lose most weeks costs little. With no punts your roster ranks ${ord(B.no_punt.team_rank)} of ${B.no_punt.of}.</p>
 
     <h3>Your roster in this build: ${puntName(cur.punts)}</h3>
     <div class="table-wrap"><table class="grid"><thead><tr><th class="l">Player</th><th>Normal rank</th><th>Build rank</th><th>Change</th><th class="l">Fit</th><th class="l">Strengths for this build</th></tr></thead><tbody>
@@ -723,6 +735,16 @@ function renderBuild() {
     S.buildPunts = b.dataset.punts ? b.dataset.punts.split(",") : [];
     loadBuild();
   }));
+  $$("#bOut .ptile").forEach((t) => t.addEventListener("click", () => {
+    const set = new Set(cur.punts), c = t.dataset.cat;
+    if (set.has(c)) set.delete(c);
+    else if (set.size >= B.max_punts) { $("#bMsg").textContent = `You can punt at most ${B.max_punts}: you still need to win ${B.need} categories.`; return; }
+    else set.add(c);
+    S.buildPunts = B.cats.filter((x) => set.has(x));
+    loadBuild();
+  }));
+  $("#bRec") && $("#bRec").addEventListener("click", () => { S.buildPunts = null; loadBuild(); });
+  $("#bNone") && $("#bNone").addEventListener("click", () => { S.buildPunts = []; loadBuild(); });
   $$(".trybtn").forEach((b) => b.addEventListener("click", () => {
     S.trade.a = S.myTeam; S.trade.b = +b.dataset.owner;
     resetSel(); S.trade.aGive.add(b.dataset.give); S.trade.bGive.add(b.dataset.get);

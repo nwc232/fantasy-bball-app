@@ -23,8 +23,21 @@ def test_builds_cover_punt_sets_and_prefer_weak_categories():
     top = r["builds"][0]
     # the recommended punts are categories this team is losing, not ones it wins
     assert all(win[c] < 50 for c in top["punts"])
-    # TO is already ignored by DURANT H2H, so "punt TO" never appears as its own build
-    assert not any(b["punts"] == ["tov"] for b in r["builds"])
+    assert len(r["builds"]) == B.MAX_BUILDS and r["builds"][0]["place"] == 1
+
+
+def test_turnovers_count_in_builds_even_under_durant():
+    """DURANT rankings ignore TO, but a build should only ignore it when you punt it."""
+    p, df = _ctx()
+    sy = E.SYSTEMS["durant_h2h"]
+    keep = B.advise(p, df, sy, 5, [])
+    punt = B.advise(p, df, sy, 5, ["tov"])
+    assert keep["tov_note"] and "tov" in keep["build"]["targets"]
+    assert punt["build"]["punts"] == ["tov"] and "tov" not in punt["build"]["targets"]
+    # build ranks differ once TO is in or out (high-turnover players move)
+    a = {m["id"]: m["build_rank"] for m in keep["players"] if m["build_rank"]}
+    b = {m["id"]: m["build_rank"] for m in punt["players"] if m["build_rank"]}
+    assert a != b
 
 
 def test_misfits_and_swap_targets_are_priced_similarly_but_fit_better():
@@ -46,3 +59,11 @@ def test_choosing_a_build_and_endpoint():
     j = c.get(f"/api/league/{key}/build?team_id=2&build=none").json()
     assert j["build"]["punts"] == []
     assert c.get(f"/api/league/{key}/build?team_id=999").status_code == 404
+
+
+def test_custom_build_beyond_search_and_too_many_punts():
+    key = c.post("/api/league/demo").json()["key"]
+    j = c.get(f"/api/league/{key}/build?team_id=2&build=reb,blk,ast,tov").json()   # 4 punts: still 5 to win
+    assert len(j["build"]["punts"]) == 4 and j["build"]["place"] is None and j["build"]["team_rank"] >= 1
+    r = c.get(f"/api/league/{key}/build?team_id=2&build=reb,blk,ast,tov,stl")
+    assert r.status_code == 400
